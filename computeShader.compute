@@ -1,0 +1,135 @@
+#version 460 core
+
+struct Ray {
+    vec3 origin;
+    vec3 direction;
+};
+
+struct Sphere {
+    vec3 position;
+    float radius;
+    vec4 color;
+    vec3 velocity;
+    float density;
+};
+
+struct HitInfo {
+    vec3 position;
+    vec3 normal;
+    int sphereIndex;
+};
+
+layout (std430, binding = 1) buffer spheresBuffer {
+    Sphere spheresData[];
+};
+
+layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+layout (rgba32f, binding = 0) uniform image2D screen;
+
+uniform float halffov;
+uniform uint objectAmount;
+
+float RandomValue(inout uint seed) {
+    seed *= (seed + 195439) * (seed + 124395) * (seed + 845921);
+    return seed / 4294967295.0;
+}
+
+float RandomValueNormalDistribution(inout uint seed) {
+    float theta = 2 * 3.14159265359 * RandomValue(seed);
+    float rho = sqrt(-2.0 * log(RandomValue(seed)));
+    return rho * cos(theta);
+}
+
+vec3 GetRandomDirection(inout uint seed) {
+    float x = RandomValueNormalDistribution(seed);
+    float y = RandomValueNormalDistribution(seed);
+    float z = RandomValueNormalDistribution(seed);
+    return normalize(vec3(x, y, z));
+}
+float sdSphere(vec3 p, vec3 center, float radius) {
+    return length(p - center) - radius;
+}
+float sdUnionNSpheres(vec3 p) {
+    float globalDistance = 1000000.0;
+
+    for (int i = 0; i < objectAmount; ++i) {
+        float dist = sdSphere(p, spheresData[i].position, spheresData[i].radius);
+        globalDistance = min(globalDistance, dist);
+    }
+
+    return globalDistance;
+}
+HitInfo GetHitInfoFromRay(Ray ray) {
+    HitInfo hitInfo;
+    hitInfo.normal = vec3(0,0,0);
+    hitInfo.position = vec3(0,0,0);
+    hitInfo.sphereIndex = -1;
+    float distance = 99999999.0;
+
+    for (int i = 0; i < objectAmount; i++) {
+        vec3 oc = ray.origin - spheresData[i].position;
+        float a = 2 * dot(ray.direction, oc);
+        if (a > 0.0) continue;
+        float b = dot(oc, oc) - spheresData[i].radius * spheresData[i].radius;
+        float intersectionState = a * a - 4 * b;
+        float curDistance = (-a - sqrt(intersectionState)) / 2;
+        vec3 intersection = ray.origin + ray.direction * curDistance;
+        vec3 normalTemp = normalize(intersection - spheresData[i].position);
+
+        if ((intersectionState >= 0.0) && (distance > curDistance)) {
+            hitInfo.normal = normalTemp;
+            hitInfo.position = intersection;
+            hitInfo.sphereIndex = i;
+            distance = curDistance;
+        }
+    }
+    return hitInfo;
+}
+
+
+void main() {
+
+    ivec2 pixelCoords = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dimensions = imageSize(screen);
+
+    float y = float(pixelCoords.y * 2 - dimensions.y) / float(dimensions.y);
+    float x = float(pixelCoords.x * 2 - dimensions.x) / float(dimensions.y);
+
+    vec3 cameraPos = vec3(0, 0.0, -15.0);
+    vec3 rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
+    vec3 rayDir = normalize(rayOrigin - cameraPos);
+
+    vec3 light = vec3(0,0,0);
+    uint repetition = 1;
+
+    for (int i = 0; i < repetition; i++) {
+        vec3 tempCol = vec3(1,1,1);
+        rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
+        rayDir = normalize(rayOrigin - cameraPos);
+
+        for (int j = 0; j < 1; j++) {
+            Ray ray;
+            ray.origin = rayOrigin;
+            ray.direction = rayDir;
+
+            HitInfo hitInfo = GetHitInfoFromRay(ray);
+            if (hitInfo.sphereIndex == -1) {
+                tempCol = vec3(0,0,0);
+                break;
+            }
+
+            rayOrigin = hitInfo.position + hitInfo.normal * 0.001; // small offset
+            uint rng = pixelCoords.x + pixelCoords.y * dimensions.x + dimensions.x * dimensions.y * i;
+
+            // simple diffuse bounce
+            rayDir = normalize(reflect(rayDir, hitInfo.normal) + GetRandomDirection(rng) * 0.2);
+
+            // accumulate color from sphere
+            tempCol *= spheresData[hitInfo.sphereIndex].color.xyz;
+        }
+        light += tempCol / repetition;
+    }
+
+    vec4 pixel = vec4(light, 1.0);
+    imageStore(screen, pixelCoords, pixel);
+}
