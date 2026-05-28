@@ -198,7 +198,7 @@ static std::vector<Sphere> CreateSphereArray(float center[], float bound[], int 
 void UpdateFrame(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[]) {
 	// Physics update
 	res.physicsShader.Activate();
-	glUniform1f(glGetUniformLocation(res.physicsShader.ID, "gravity"), 0.1f);
+	glUniform1f(glGetUniformLocation(res.physicsShader.ID, "gravity"), 10.0f);
 	glUniform1ui(glGetUniformLocation(res.physicsShader.ID, "objectAmount"), spheresArray.size());
 	glUniform3f(glGetUniformLocation(res.physicsShader.ID, "bounds"), bounds[0], bounds[1], bounds[2]);
 	glDispatchCompute(GLuint(floor( spheresArray.size() / 32)+1), 1, 1);
@@ -237,13 +237,13 @@ int main() {
 	glfwSwapInterval(vSync);
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
-	float bounds[3] = { 5.f, 3.f, 3.f };
+	float bounds[3] = { 6.f, 3.f, 2.f };
 	float center[3] = { 0.f, 0.f, 0.f };
-	int amount = 2000;
+	int amount = 3000;
 	std::vector<Sphere> spheres = CreateSphereArray(center, bounds, amount);
 
 	//create simulation bounds
-	float simulationBounds[4] = { 10.f, 5.f, 5.f };
+	float simulationBounds[4] = { 10.f, 5.f, 1.f };
 	RenderResources res = InitRenderResources(spheres);
 
 	FrameTimer timer;

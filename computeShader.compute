@@ -70,7 +70,7 @@ HitInfo GetHitInfoFromRay(Ray ray) {
         vec3 oc = ray.origin - spheresData[i].position;
         float a = 2 * dot(ray.direction, oc);
         if (a > 0.0) continue;
-        float b = dot(oc, oc) - spheresData[i].radius * spheresData[i].radius;
+        float b = dot(oc, oc) - spheresData[i].radius * spheresData[i].radius*0.1;
         float intersectionState = a * a - 4 * b;
         float curDistance = (-a - sqrt(intersectionState)) / 2;
         vec3 intersection = ray.origin + ray.direction * curDistance;

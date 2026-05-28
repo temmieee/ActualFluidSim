@@ -1,8 +1,10 @@
 #version 430
 const float PI=3.14159265359;
-const float targetDensity=1;
-const float pressureMultiplier=0.2;
-const float collisionDamping=-0.9;
+const float targetDensity=4;
+const float pressureMultiplier=10;
+const float collisionDamping=-0.5;
+const float deltaTime=1.f/60.f;
+const float viscousityMultiplier=0.1f;
 struct Sphere {
     vec3 position;
     float radius;
@@ -63,7 +65,15 @@ float SmoothingKernelDerivative(float radius, float dst){
 	}
 	return 0;
 }
-float CalculatingSphereDensity(uint sphereIndex){
+float CalculatePointDensity(vec3 position){
+    float density=0.0;
+    for(uint i=0;i<objectAmount;++i){
+        float dst=max(length(position-spheres[i].position),0.0001);
+        density+=SmoothingKernel(spheres[i].radius,dst);
+    }
+    return density;
+}
+float CalculateSphereDensity(uint sphereIndex){
     float density=0.0;
     for(uint i=0;i<objectAmount;++i){
         float dst=max(length(spheres[sphereIndex].position-spheres[i].position),0.0001);
@@ -76,16 +86,9 @@ float ConvertDensityToPressure(float d){
     float pressure=densityError*pressureMultiplier;
     return pressure;
 }
-float CalculatingPointDensity(vec3 position){
-    float density=0.0;
-    for(uint i=0;i<objectAmount;++i){
-        float dst=max(length(position-spheres[i].position),0.0001);
-        density+=SmoothingKernel(spheres[i].radius,dst);
-    }
-    return density;
-}
+
 vec3 CalculatePressureForce(uint sphereIndex){
-    vec3 gradientVector=vec3(0,0,0);
+    vec3 pressureForce=vec3(0,0,0);
     for (uint i=0;i<objectAmount;i++){
         if (i==sphereIndex) continue;
         vec3 dir=(spheres[i].position-spheres[sphereIndex].position);
@@ -94,29 +97,48 @@ vec3 CalculatePressureForce(uint sphereIndex){
         dir=dst==0? GetRandomDirection(seed):normalize(dir);
         float slope=SmoothingKernelDerivative(spheres[i].radius,dst);
         float d=max(spheres[i].density,1);
-        
-        gradientVector+=ConvertDensityToPressure(d)*dir*slope/d;
+        float currD=max(spheres[sphereIndex].density,1);
+        float sharedPressure=(ConvertDensityToPressure(d)+ConvertDensityToPressure(currD))*0.5;
+        pressureForce+=sharedPressure*dir*slope/d;
     }
-    return gradientVector;
+    return pressureForce;
+}
+vec3 CalculateViscousityForce(uint sphereIndex){
+    vec3 viscousityForce=vec3(0,0,0);
+    for (uint i=0;i<objectAmount;i++){
+        if (i==sphereIndex) continue;
+        vec3 dir=(spheres[i].position-spheres[sphereIndex].position);
+        float dst=length(dir);
+        float influence=SmoothingKernel(spheres[i].radius,dst);
+        vec3 diff=spheres[i].velocity-spheres[sphereIndex].velocity;
+        viscousityForce+=diff*influence;
+    }
+    return viscousityForce;
 }
 void main() {
     uint i = gl_GlobalInvocationID.x;
-    float currDensity=CalculatingSphereDensity(i);
+    //gravity
+    spheres[i].velocity.y -= gravity*deltaTime;
+    //pressure
+    vec3 predictedPosition=spheres[i].position+spheres[i].velocity *0.016;
+    float currDensity=CalculatePointDensity(predictedPosition);
     spheres[i].density=currDensity;
     spheres[i].color.xyz=currDensity.xxx/10;
      
     vec3 pressureForce=CalculatePressureForce(i);
   
-    vec3 acceleration=pressureForce/currDensity;
-    //spheres[i].color.xyz=acceleration;
+    vec3 acceleration=pressureForce/currDensity;    
+    spheres[i].velocity+=acceleration*deltaTime;
+
+    vec3 viscousityForce=CalculateViscousityForce(i);
+    spheres[i].velocity+=viscousityForce*deltaTime*viscousityMultiplier;
     
-    spheres[i].velocity+=acceleration;
+    spheres[i].color.xyz=length(spheres[i].velocity).xxx/5;
 
 
-    //gravity
-    spheres[i].velocity.y -= gravity;
-
-    spheres[i].position += spheres[i].velocity * 0.016;
+    //changing position
+    spheres[i].position += spheres[i].velocity * deltaTime;
+    
 
     //bounds
     if (abs(spheres[i].position.x) > bounds.x) {
