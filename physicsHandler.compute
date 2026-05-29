@@ -1,10 +1,67 @@
-#version 430
+#version 460 core
+
 const float PI=3.14159265359;
-const float targetDensity=4;
-const float pressureMultiplier=10;
-const float collisionDamping=-0.5;
+const float targetDensity=5;
+const float pressureMultiplier=15;
+const float collisionDamping=-0.9;
 const float deltaTime=1.f/60.f;
-const float viscousityMultiplier=0.1f;
+const float viscousityMultiplier=0.5f;
+
+//spatial hashing
+const ivec3 offsets3D[] =
+{
+    ivec3(-1, -1, -1),
+	ivec3(-1, -1, 0),
+	ivec3(-1, -1, 1),
+	ivec3(-1, 0, -1),
+	ivec3(-1, 0, 0),
+	ivec3(-1, 0, 1),
+	ivec3(-1, 1, -1),
+	ivec3(-1, 1, 0),
+	ivec3(-1, 1, 1),
+	ivec3(0, -1, -1),
+	ivec3(0, -1, 0),
+	ivec3(0, -1, 1),
+	ivec3(0, 0, -1),
+	ivec3(0, 0, 0),
+	ivec3(0, 0, 1),
+	ivec3(0, 1, -1),
+	ivec3(0, 1, 0),
+	ivec3(0, 1, 1),
+	ivec3(1, -1, -1),
+	ivec3(1, -1, 0),
+	ivec3(1, -1, 1),
+	ivec3(1, 0, -1),
+	ivec3(1, 0, 0),
+	ivec3(1, 0, 1),
+	ivec3(1, 1, -1),
+	ivec3(1, 1, 0),
+	ivec3(1, 1, 1)
+};
+
+// Constants used for hashing
+const uint hashK1 = 15823;
+const uint hashK2 = 9737333;
+const uint hashK3 = 440817757;
+
+// Convert floating point position into an integer cell coordinate
+ivec3 GetCell3D(vec3 position, float radius)
+{
+    return ivec3(floor(position / radius));
+}
+
+// Hash cell coordinate to a single unsigned integer
+uint HashCell3D(ivec3 cell)
+{
+    cell = ivec3(uvec3(cell));
+    return (cell.x * hashK1) + (cell.y * hashK2) + (cell.z * hashK3);
+}
+
+uint KeyFromHash(uint hash, uint tableSize)
+{
+    return hash % tableSize;
+}
+
 struct Sphere {
     vec3 position;
     float radius;
@@ -14,7 +71,7 @@ struct Sphere {
 };
 
 layout(std430, binding = 1) buffer SphereBuffer {
-    Sphere spheres[];
+    Sphere objectData[];
 };
 layout(local_size_x = 32) in;
 uniform float gravity;
@@ -68,16 +125,16 @@ float SmoothingKernelDerivative(float radius, float dst){
 float CalculatePointDensity(vec3 position){
     float density=0.0;
     for(uint i=0;i<objectAmount;++i){
-        float dst=max(length(position-spheres[i].position),0.0001);
-        density+=SmoothingKernel(spheres[i].radius,dst);
+        float dst=max(length(position-objectData[i].position),0.1);
+        density+=SmoothingKernel(objectData[i].radius,dst);
     }
     return density;
 }
 float CalculateSphereDensity(uint sphereIndex){
     float density=0.0;
     for(uint i=0;i<objectAmount;++i){
-        float dst=max(length(spheres[sphereIndex].position-spheres[i].position),0.0001);
-        density+=SmoothingKernel(spheres[i].radius,dst);
+        float dst=max(length(objectData[sphereIndex].position-objectData[i].position),0.1);
+        density+=SmoothingKernel(objectData[i].radius,dst);
     }
     return density;
 }
@@ -91,13 +148,13 @@ vec3 CalculatePressureForce(uint sphereIndex){
     vec3 pressureForce=vec3(0,0,0);
     for (uint i=0;i<objectAmount;i++){
         if (i==sphereIndex) continue;
-        vec3 dir=(spheres[i].position-spheres[sphereIndex].position);
+        vec3 dir=(objectData[i].position-objectData[sphereIndex].position);
         float dst=length(dir);
-        uint seed=uint(spheres[i].density*6546436);
-        dir=dst==0? GetRandomDirection(seed):normalize(dir);
-        float slope=SmoothingKernelDerivative(spheres[i].radius,dst);
-        float d=max(spheres[i].density,1);
-        float currD=max(spheres[sphereIndex].density,1);
+        uint seed=uint(objectData[i].density*6546436);
+        dir = dst == 0 ? GetRandomDirection(seed) : normalize(dir);
+        float slope=SmoothingKernelDerivative(objectData[i].radius,dst);
+        float d=max(objectData[i].density,1);
+        float currD=max(objectData[sphereIndex].density,1);
         float sharedPressure=(ConvertDensityToPressure(d)+ConvertDensityToPressure(currD))*0.5;
         pressureForce+=sharedPressure*dir*slope/d;
     }
@@ -107,50 +164,61 @@ vec3 CalculateViscousityForce(uint sphereIndex){
     vec3 viscousityForce=vec3(0,0,0);
     for (uint i=0;i<objectAmount;i++){
         if (i==sphereIndex) continue;
-        vec3 dir=(spheres[i].position-spheres[sphereIndex].position);
+        vec3 dir=(objectData[i].position-objectData[sphereIndex].position);
         float dst=length(dir);
-        float influence=SmoothingKernel(spheres[i].radius,dst);
-        vec3 diff=spheres[i].velocity-spheres[sphereIndex].velocity;
-        viscousityForce+=diff*influence;
+        float influence=SmoothingKernel(objectData[i].radius,dst);
+        float d = max(objectData[sphereIndex].density, 1);
+        vec3 diff=objectData[i].velocity-objectData[sphereIndex].velocity;
+        viscousityForce+=diff*influence*viscousityMultiplier*d;
     }
     return viscousityForce;
 }
 void main() {
     uint i = gl_GlobalInvocationID.x;
     //gravity
-    spheres[i].velocity.y -= gravity*deltaTime;
+    objectData[i].velocity.y -= gravity*deltaTime;
     //pressure
-    vec3 predictedPosition=spheres[i].position+spheres[i].velocity *0.016;
+    vec3 predictedPosition = objectData[i].position + objectData[i].velocity * 0.016;
     float currDensity=CalculatePointDensity(predictedPosition);
-    spheres[i].density=currDensity;
-    spheres[i].color.xyz=currDensity.xxx/10;
+    objectData[i].density=currDensity;
+    objectData[i].color.xyz=currDensity.xxx/10;
      
     vec3 pressureForce=CalculatePressureForce(i);
   
-    vec3 acceleration=pressureForce/currDensity;    
-    spheres[i].velocity+=acceleration*deltaTime;
-
-    vec3 viscousityForce=CalculateViscousityForce(i);
-    spheres[i].velocity+=viscousityForce*deltaTime*viscousityMultiplier;
+    vec3 viscousityForce = CalculateViscousityForce(i);
     
-    spheres[i].color.xyz=length(spheres[i].velocity).xxx/5;
+    vec3 acceleration = (viscousityForce + pressureForce) / currDensity;
+    acceleration = min(acceleration, 999999);
+    objectData[i].velocity+=acceleration*deltaTime;
+    
+ 
 
 
     //changing position
-    spheres[i].position += spheres[i].velocity * deltaTime;
+    objectData[i].position += objectData[i].velocity * deltaTime;
     
 
     //bounds
-    if (abs(spheres[i].position.x) > bounds.x) {
-        spheres[i].position.x = sign(spheres[i].position.x) * bounds.x;
-        spheres[i].velocity.x *= collisionDamping;
+    if (abs(objectData[i].position.x) > bounds.x) {
+        objectData[i].position.x = sign(objectData[i].position.x) * bounds.x;
+        objectData[i].velocity.x *= collisionDamping;
+        //objectData[i].velocity *= 0.9;
+
     }
-    if (abs(spheres[i].position.y) > bounds.y) {
-        spheres[i].position.y = sign(spheres[i].position.y) * bounds.y;
-        spheres[i].velocity.y *= collisionDamping;
+    if (abs(objectData[i].position.y) > bounds.y) {
+        objectData[i].position.y = sign(objectData[i].position.y) * bounds.y;
+        objectData[i].velocity.y *= collisionDamping;
+        //objectData[i].velocity *= 0.9;
+        
     }
-    if (abs(spheres[i].position.z) > bounds.z) {
-        spheres[i].position.z = sign(spheres[i].position.z) * bounds.z;
-        spheres[i].velocity.z *= collisionDamping;
+    if (abs(objectData[i].position.z) > bounds.z) {
+        objectData[i].position.z = sign(objectData[i].position.z) * bounds.z;
+        objectData[i].velocity.z *= collisionDamping;
+        //objectData[i].velocity *= 0.9;
     }
+    
+     //color debugging
+    float weight = length(objectData[i].velocity)/4;
+    objectData[i].color.xyz = mix(vec3(0, 0.5, 1), vec3(1, 0.5, 0), weight);
+    objectData[i].color.xyz = mix(objectData[i].color.xyz, vec3(1, 0.0, 0), weight);
 }

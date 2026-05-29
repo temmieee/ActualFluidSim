@@ -34,6 +34,7 @@ GLuint indices[] =
 	0, 2, 1,
 	0, 3, 2
 };
+
 struct Vector3
 {
 	GLfloat x, y, z;
@@ -42,7 +43,7 @@ struct Vector4
 {
 	GLfloat x, y, z,w;
 };
-struct alignas(16) Sphere{
+struct Sphere{
 	Vector3 position;
 	GLfloat radius;
 	Vector4 color;
@@ -62,7 +63,17 @@ struct alignas(16) Sphere{
 		density = input[11];
 	}
 };
-
+struct SphereIndex {
+	unsigned int sphereIndex, cellKey;
+	SphereIndex() {
+		sphereIndex = 0;
+		cellKey = 0;
+	}
+	SphereIndex(unsigned int inSphereIndex, unsigned int inCellKey) {
+		sphereIndex = inSphereIndex;
+		cellKey = inCellKey;
+	}
+};
 
 void PrintSpecs() {
 	int work_grp_cnt[3];
@@ -92,9 +103,11 @@ struct RenderResources {
 	// Geometry
 	GLuint VAO, VBO, EBO;
 
-	// GPU storage
-	GLuint screenTex;       // render target texture
-	GLuint spheresBuffer;   // SSBO for sphere data
+	// GPU pointers
+	GLuint screenTex;
+	GLuint spheresBuffer;
+	GLuint spatialBuffer;
+	GLuint spatialIndexBuffer;
 
 	// Shaders
 	Shader screenShader;    // final blit shader
@@ -102,7 +115,7 @@ struct RenderResources {
 	Shader physicsShader;   // compute shader for physics
 
 	RenderResources(const char* vertPath,	const char* fragPath,	const char* renderComputePath,	const char* physicsComputePath)
-		: screenShader(vertPath, fragPath),	renderShader(renderComputePath), physicsShader(physicsComputePath),	spheresBuffer(0), screenTex(0), VAO(0), VBO(0), EBO(0) {
+		: screenShader(vertPath, fragPath),	renderShader(renderComputePath), physicsShader(physicsComputePath),	spheresBuffer(0), spatialBuffer(0), spatialIndexBuffer(0), screenTex(0), VAO(0), VBO(0), EBO(0) {
 	}
 };
 
@@ -118,7 +131,7 @@ void CleanupRenderResources(RenderResources& res) {
 	res.screenShader.Delete();
 }
 
-RenderResources InitRenderResources(std::vector<Sphere>& spheresArray) {
+RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vector<SphereIndex>& spatialArray,std::vector<unsigned int>& spatialIndexArray) {
 	RenderResources res("default.vert", "default.frag", "computeShader.compute","physicsHandler.compute");
 
 	glCreateVertexArrays(1, &res.VAO);
@@ -148,14 +161,41 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray) {
 	glTextureStorage2D(res.screenTex, 1, GL_RGBA32F, SCREEN_WIDTH, SCREEN_HEIGHT);
 	glBindImageTexture(0, res.screenTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
+	//init buffer
+	unsigned int amount = spheresArray.size();
+
+	for (unsigned int i = 0; i < amount; i++) {
+		SphereIndex sphereIndex(i,0);
+		spatialArray.push_back(sphereIndex);
+		spatialIndexArray.push_back(INFINITY);
+	}
 	glCreateBuffers(1, &res.spheresBuffer);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, res.spheresBuffer);
 	glBufferData(GL_SHADER_STORAGE_BUFFER,
-		spheresArray.size() * sizeof(Sphere),
+		amount * sizeof(Sphere),
 		spheresArray.data(),
 		GL_DYNAMIC_COPY);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, res.spheresBuffer);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	glCreateBuffers(1, &res.spatialBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, res.spatialBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER,
+		amount * sizeof(SphereIndex),
+		spatialArray.data(),
+		GL_DYNAMIC_COPY);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, res.spatialBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	glCreateBuffers(1, &res.spatialIndexBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, res.spatialIndexBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER,
+		amount * sizeof(unsigned int),
+		spatialIndexArray.data(),
+		GL_DYNAMIC_COPY);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, res.spatialIndexBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
 
 	return res;
 }
@@ -178,7 +218,7 @@ static std::vector<Sphere> CreateSphereArray(float center[], float bound[], int 
 				float positionX = center[0]+(i - dimensions[0] / 2) * dimension;
 				float positionY = center[1] + (j - dimensions[1] / 2) * dimension;
 				float positionZ = center[2] + (k - dimensions[2] / 2) * dimension;
-				float radius = dimension*2;
+				float radius = 1;
 
 				float colorR = static_cast<float>(rand()) / RAND_MAX;
 				float colorG = static_cast<float>(rand()) / RAND_MAX;
@@ -187,7 +227,7 @@ static std::vector<Sphere> CreateSphereArray(float center[], float bound[], int 
 
 				Sphere newSphere(new float[]{
 					positionX, positionY, positionZ, radius,
-						colorR, colorG, colorB, colorA, 0, 0, 0, 0
+						colorR, colorG, colorB, colorA, 0, 0, 0, 1
 					});
 				spheres.push_back(newSphere);
 			}
@@ -237,14 +277,15 @@ int main() {
 	glfwSwapInterval(vSync);
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
-	float bounds[3] = { 6.f, 3.f, 2.f };
+	float bounds[3] = { 3.f, 3.f, 1.5f };
 	float center[3] = { 0.f, 0.f, 0.f };
 	int amount = 3000;
 	std::vector<Sphere> spheres = CreateSphereArray(center, bounds, amount);
-
+	std::vector<SphereIndex> spheresIndices;
+	std::vector<unsigned int> spatialIndices;
 	//create simulation bounds
 	float simulationBounds[4] = { 10.f, 5.f, 1.f };
-	RenderResources res = InitRenderResources(spheres);
+	RenderResources res = InitRenderResources(spheres, spheresIndices,spatialIndices);
 
 	FrameTimer timer;
 	timer.Start();
