@@ -69,5 +69,8 @@
     <Text Include="computeShader.compute">
       <Filter>Resource Files\Shaders</Filter>
     </Text>
+    <Text Include="GPUSort.compute">
+      <Filter>Resource Files\Shaders</Filter>
+    </Text>
   </ItemGroup>
 </Project>

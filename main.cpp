@@ -9,6 +9,7 @@
 #include <cmath>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 
 const unsigned int SCREEN_WIDTH = 2048;
@@ -18,6 +19,10 @@ const unsigned short OPENGL_MAJOR_VERSION = 4;
 const unsigned short OPENGL_MINOR_VERSION = 6;
 
 bool vSync = true;
+
+const float FOV = 90.0f;
+const unsigned int threadCount = 32;
+
 
 
 
@@ -41,15 +46,16 @@ struct Vector3
 }; 
 struct Vector4
 {
-	GLfloat x, y, z,w;
+	GLfloat x, y, z, w;
 };
 struct Sphere{
 	Vector3 position;
-	GLfloat radius;
+	float radius;
 	Vector4 color;
 	Vector3 velocity;
 	float density;
-	
+	Vector3 predictedPosition;
+	float debug;
 	Sphere(float input[]) {
 		position.x = input[0];
 		position.y = input[1];
@@ -61,20 +67,27 @@ struct Sphere{
 		color.w = input[7];
 		velocity = { input[8], input[9], input[10] };
 		density = input[11];
+		predictedPosition.x = input[0];
+		predictedPosition.y = input[1];
+		predictedPosition.z = input[2];
+		debug = 0;
 	}
 };
 struct SphereIndex {
-	unsigned int sphereIndex, cellKey;
+	unsigned int sphereIndex, hash, cellKey, debug;
 	SphereIndex() {
 		sphereIndex = 0;
+		hash = 0;
 		cellKey = 0;
+		debug = 0;
 	}
 	SphereIndex(unsigned int inSphereIndex, unsigned int inCellKey) {
 		sphereIndex = inSphereIndex;
 		cellKey = inCellKey;
 	}
 };
-
+std::vector<SphereIndex> spheresIndices;
+std::vector<unsigned int> spatialIndices;
 void PrintSpecs() {
 	int work_grp_cnt[3];
 	glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &work_grp_cnt[0]);
@@ -109,13 +122,25 @@ struct RenderResources {
 	GLuint spatialBuffer;
 	GLuint spatialIndexBuffer;
 
+	GLuint physicsObjectAmount;
+	GLuint physicsGravity;
+	GLuint physicsBounds;
+	GLuint renderObjectAmount;
+	GLuint sortObjectAmount;
+	GLuint renderHalfFov;
+	GLuint sortGroupWidth;
+	GLuint sortGroupHeight;
+	GLuint sortStepIndex;
 	// Shaders
-	Shader screenShader;    // final blit shader
-	Shader renderShader;    // compute shader for rendering
-	Shader physicsShader;   // compute shader for physics
-
-	RenderResources(const char* vertPath,	const char* fragPath,	const char* renderComputePath,	const char* physicsComputePath)
-		: screenShader(vertPath, fragPath),	renderShader(renderComputePath), physicsShader(physicsComputePath),	spheresBuffer(0), spatialBuffer(0), spatialIndexBuffer(0), screenTex(0), VAO(0), VBO(0), EBO(0) {
+	Shader screenShader;
+	Shader renderShader;
+	Shader physicsShader;
+	Shader sortShader; 
+	RenderResources(const char* vertPath,	const char* fragPath,	const char* renderComputePath,	const char* physicsComputePath, const char* sortComputePath)
+		: screenShader(vertPath, fragPath),	renderShader(renderComputePath), physicsShader(physicsComputePath), sortShader(sortComputePath),
+		spheresBuffer(0), spatialBuffer(0), spatialIndexBuffer(0),
+		physicsObjectAmount(0), renderObjectAmount(0), sortObjectAmount(0), physicsGravity(0), physicsBounds(0), renderHalfFov(0), sortGroupWidth(0), sortGroupHeight(0), sortStepIndex(0),
+		screenTex(0), VAO(0), VBO(0), EBO(0) {
 	}
 };
 
@@ -129,10 +154,11 @@ void CleanupRenderResources(RenderResources& res) {
 	res.renderShader.Delete();
 	res.physicsShader.Delete();
 	res.screenShader.Delete();
+	res.sortShader.Delete();
 }
 
 RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vector<SphereIndex>& spatialArray,std::vector<unsigned int>& spatialIndexArray) {
-	RenderResources res("default.vert", "default.frag", "computeShader.compute","physicsHandler.compute");
+	RenderResources res("default.vert", "default.frag", "computeShader.compute","physicsHandler.compute", "GPUSort.compute");
 
 	glCreateVertexArrays(1, &res.VAO);
 	glCreateBuffers(1, &res.VBO);
@@ -167,7 +193,7 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 	for (unsigned int i = 0; i < amount; i++) {
 		SphereIndex sphereIndex(i,0);
 		spatialArray.push_back(sphereIndex);
-		spatialIndexArray.push_back(INFINITY);
+		spatialIndexArray.push_back(amount+1);
 	}
 	glCreateBuffers(1, &res.spheresBuffer);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, res.spheresBuffer);
@@ -196,7 +222,16 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, res.spatialIndexBuffer);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-
+	//get uniform location
+	res.physicsObjectAmount=glGetUniformLocation(res.physicsShader.ID, "objectAmount");
+	res.renderObjectAmount = glGetUniformLocation(res.renderShader.ID, "objectAmount");
+	res.sortObjectAmount = glGetUniformLocation(res.sortShader.ID, "objectAmount");
+	res.physicsGravity = glGetUniformLocation(res.physicsShader.ID, "gravity");
+	res.physicsBounds = glGetUniformLocation(res.physicsShader.ID, "bounds");
+	res.renderHalfFov = glGetUniformLocation(res.renderShader.ID, "halffov");
+	res.sortGroupWidth = glGetUniformLocation(res.sortShader.ID, "groupWidth");
+	res.sortGroupHeight = glGetUniformLocation(res.sortShader.ID, "groupHeight");
+	res.sortStepIndex = glGetUniformLocation(res.sortShader.ID, "stepIndex");
 	return res;
 }
 
@@ -218,7 +253,7 @@ static std::vector<Sphere> CreateSphereArray(float center[], float bound[], int 
 				float positionX = center[0]+(i - dimensions[0] / 2) * dimension;
 				float positionY = center[1] + (j - dimensions[1] / 2) * dimension;
 				float positionZ = center[2] + (k - dimensions[2] / 2) * dimension;
-				float radius = 1;
+				float radius = 1.;
 
 				float colorR = static_cast<float>(rand()) / RAND_MAX;
 				float colorG = static_cast<float>(rand()) / RAND_MAX;
@@ -235,23 +270,76 @@ static std::vector<Sphere> CreateSphereArray(float center[], float bound[], int 
 	}
 	return spheres;
 }
+
+
+unsigned int BitAmount(unsigned int input) {
+	input--;       
+	input |= input >> 1;  
+	input |= input >> 2;
+	input |= input >> 4;
+	input |= input >> 8;
+	input |= input >> 16;
+	input |= input >> 32;
+	input++;
+	return input;
+}
+void Sort(RenderResources& res, unsigned int objectAmount) {
+	res.sortShader.Activate();
+	glUniform1ui(res.sortObjectAmount, objectAmount);
+
+	
+	unsigned int stages= log2(BitAmount(objectAmount));
+	for (int stageIndex = 0; stageIndex < stages; stageIndex++)
+	{
+		for (int stepIndex = 0; stepIndex < stageIndex + 1; stepIndex++)
+		{
+			// Calculate patterns
+			int groupWidth = 1 << (stageIndex - stepIndex);
+			int groupHeight = 2 * groupWidth - 1;
+			glUniform1ui(res.sortGroupWidth, groupWidth);
+			glUniform1ui(res.sortGroupHeight, groupHeight);
+			glUniform1ui(res.sortStepIndex, stepIndex);
+
+			glDispatchCompute(BitAmount(objectAmount) / (2*threadCount), 1, 1);
+			GLenum err = glGetError();
+			if (err != GL_NO_ERROR) {
+				std::cerr << "Sort dispatch failed with error code: " << err << std::endl;
+			}
+			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+		}
+	}
+	glUniform1ui(res.sortStepIndex, objectAmount + 1);
+	glDispatchCompute(GLuint(objectAmount / threadCount + 1), 1, 1);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+}
+
 void UpdateFrame(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[]) {
+	//Sort
+	unsigned int objectAmount=spheresArray.size();
+	Sort(res, objectAmount);
 	// Physics update
 	res.physicsShader.Activate();
-	glUniform1f(glGetUniformLocation(res.physicsShader.ID, "gravity"), 10.0f);
-	glUniform1ui(glGetUniformLocation(res.physicsShader.ID, "objectAmount"), spheresArray.size());
-	glUniform3f(glGetUniformLocation(res.physicsShader.ID, "bounds"), bounds[0], bounds[1], bounds[2]);
-	glDispatchCompute(GLuint(floor( spheresArray.size() / 32)+1), 1, 1);
-	
+	glUniform1f(res.physicsGravity, 10.0f);
+	glUniform1ui(res.physicsObjectAmount, objectAmount);
+	glUniform3f(res.physicsBounds, bounds[0], bounds[1], bounds[2]);
+	glDispatchCompute(GLuint(objectAmount / threadCount+1), 1, 1);
+	GLenum err = glGetError();
+	if (err != GL_NO_ERROR) {
+		std::cerr << "Physics dispatch failed with error code: " << err << std::endl;
+	}
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
+	
+
 	res.renderShader.Activate();
-	GLuint halffov = glGetUniformLocation(res.renderShader.ID, "halffov");
-	GLuint objectAmountRender = glGetUniformLocation(res.renderShader.ID, "objectAmount");
-	glUniform1f(halffov, 45.0f);
-	glUniform1ui(objectAmountRender, spheresArray.size());
+	glUniform1f(res.renderHalfFov, FOV/2);
+	glUniform1ui(res.renderObjectAmount, spheresArray.size());
 	glDispatchCompute((SCREEN_WIDTH + 31) / 32,	(SCREEN_HEIGHT + 31) / 32,	1);
 
+	err = glGetError();
+	if (err != GL_NO_ERROR) {
+		std::cerr << "Render dispatch failed with error code: " << err << std::endl;
+	}
 	//Draw on screen
 	res.screenShader.Activate();
 	glBindTextureUnit(0, res.screenTex);
@@ -279,30 +367,27 @@ int main() {
 	//init spheres
 	float bounds[3] = { 3.f, 3.f, 1.5f };
 	float center[3] = { 0.f, 0.f, 0.f };
-	int amount = 3000;
+	int amount =5000;
 	std::vector<Sphere> spheres = CreateSphereArray(center, bounds, amount);
-	std::vector<SphereIndex> spheresIndices;
-	std::vector<unsigned int> spatialIndices;
 	//create simulation bounds
-	float simulationBounds[4] = { 10.f, 5.f, 1.f };
+	float simulationBounds[4] = { 10.f, 5.f, 2.f };
 	RenderResources res = InitRenderResources(spheres, spheresIndices,spatialIndices);
 
 	FrameTimer timer;
 	timer.Start();
 
-	const double targetDelta = 1.0 / 60.0;
+	const double targetDelta = 1.0 / 144.0;
 
 	while (!glfwWindowShouldClose(window)) {
 		double frameStart = timer.Tick();
 
-		// Physics + render combined
+		//UpdateFrame
 		UpdateFrame(res, spheres, simulationBounds);
 
-		// Swap buffers and poll events
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 
-		// Busy-wait or sleep until 16.67 ms has passed
+		//const time
 		double frameEnd = timer.GetDelta();
 		double elapsed = frameEnd;
 
@@ -312,11 +397,11 @@ int main() {
 				std::chrono::duration<double>(sleepTime)
 			);
 		}
-		float frametime = timer.GetDelta() * 1000.0f; // Convert to milliseconds
+		float frametime = timer.GetDelta() * 1000.0f;
 		float fps = timer.GetFPS();
 		std::cout << "FPS: " << fps << "Frame Time:"<<frametime<<"\n";
 		}
-	// Cleanup GPU resources
+
 	CleanupRenderResources(res);
 
 	glfwDestroyWindow(window);

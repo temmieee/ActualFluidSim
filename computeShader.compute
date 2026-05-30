@@ -11,6 +11,8 @@ struct Sphere {
     vec4 color;
     vec3 velocity;
     float density;
+    vec3 predictedPosition;
+    float debug;
 };
 
 struct HitInfo {
@@ -66,7 +68,7 @@ HitInfo GetHitInfoFromRay(Ray ray) {
     hitInfo.sphereIndex = -1;
     float distance = 99999999.0;
 
-    for (int i = 0; i < objectAmount; i++) {
+    for (int i = 0; i < objectAmount; i+=1) {
         vec3 oc = ray.origin - spheresData[i].position;
         float a = 2 * dot(ray.direction, oc);
         if (a > 0.0) continue;
@@ -95,7 +97,7 @@ void main() {
     float y = float(pixelCoords.y * 2 - dimensions.y) / float(dimensions.y);
     float x = float(pixelCoords.x * 2 - dimensions.x) / float(dimensions.y);
 
-    vec3 cameraPos = vec3(0, 0.0, -15.0);
+    vec3 cameraPos = vec3(0, 0.0, -10.0);
     vec3 rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
     vec3 rayDir = normalize(rayOrigin - cameraPos);
 
