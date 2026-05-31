@@ -235,7 +235,7 @@ RaymarchHitInfo GetRaymarchHitInfoFromRay(Ray ray){
     //raymarchHitInfo.position=ray.origin+ray.direction*tNear;
     while (tNear<tFar){
         raymarchHitInfo.depth+=SampleDensityAtPosition(ray.origin+ray.direction*tNear);
-        tNear+=1;
+        tNear+=5;
     }
     return raymarchHitInfo;
 }
@@ -247,7 +247,7 @@ void main() {
     float y = float(pixelCoords.y * 2 - dimensions.y) / float(dimensions.y);
     float x = float(pixelCoords.x * 2 - dimensions.x) / float(dimensions.y);
 
-    vec3 cameraPos = vec3(0, 7.0, -30);
+    vec3 cameraPos = vec3(0, 10.0, -50);
     vec3 rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
     vec3 rayDir = normalize(rayOrigin - cameraPos);
 
@@ -265,7 +265,7 @@ void main() {
             ray.direction = rayDir;
             ray.inverseDir=1/rayDir;
             RaymarchHitInfo raymarchHitInfo=GetRaymarchHitInfoFromRay(ray);
-            if (raymarchHitInfo.hit) debug=raymarchHitInfo.depth.xxx/100;
+            if (raymarchHitInfo.hit) debug=raymarchHitInfo.depth.xxx/1;
             // accumulate color from sphere
             //tempCol *= objectData[hitInfo.sphereIndex].color.xyz;
         }

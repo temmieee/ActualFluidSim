@@ -70,7 +70,7 @@ struct Sphere{
 		predictedPosition.x = input[0];
 		predictedPosition.y = input[1];
 		predictedPosition.z = input[2];
-		nearDensity = 0;
+		nearDensity = input[11];
 	}
 };
 struct SphereIndex {
@@ -243,41 +243,29 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 }
 
 static std::vector<Sphere> CreateSphereArray(float center[], float bound[], int amount) {
-	float volume = bound[0] * bound[1] * bound[2] / amount;
-	float dimension = cbrt(volume);
-	float inverseDimension = 1 / dimension;
-
 	std::vector<Sphere> spheres;
-	int dimensions[3] = {
-		floor(bound[0] * inverseDimension),
-		floor(bound[1] * inverseDimension),
-		floor(bound[2] * inverseDimension)
-	};
+	spheres.reserve(amount);
 
-	for (int i = 0; i < dimensions[0]; i++) {
-		for (int j = 0; j < dimensions[1]; j++) {
-			for (int k = 0; k < dimensions[2]; k++) {
-				float positionX = center[0]+(i - dimensions[0] / 2) * dimension;
-				float positionY = center[1] + (j - dimensions[1] / 2) * dimension;
-				float positionZ = center[2] + (k - dimensions[2] / 2) * dimension;
-				float radius = 0.75;
+	for (int i = 0; i < amount; i++) {
+		float positionX = center[0] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[0];
+		float positionY = center[1] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[1];
+		float positionZ = center[2] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[2];
+		float radius = 1.0f;
 
-				float colorR = static_cast<float>(rand()) / RAND_MAX;
-				float colorG = static_cast<float>(rand()) / RAND_MAX;
-				float colorB = static_cast<float>(rand()) / RAND_MAX;
-				float colorA = 1.f;
+		float colorR = static_cast<float>(rand()) / RAND_MAX;
+		float colorG = static_cast<float>(rand()) / RAND_MAX;
+		float colorB = static_cast<float>(rand()) / RAND_MAX;
+		float colorA = 1.f;
 
-				Sphere newSphere(new float[]{
-					positionX, positionY, positionZ, radius,
-						colorR, colorG, colorB, colorA, 0, 0, 0, 1
-					});
-				spheres.push_back(newSphere);
-			}
-		}
+		Sphere newSphere(new float[] {
+			positionX, positionY, positionZ, radius,
+				colorR, colorG, colorB, colorA,
+				0, 0, 0, 0.1f
+			});
+		spheres.push_back(newSphere);
 	}
 	return spheres;
 }
-
 
 unsigned int BitAmount(unsigned int input) {
 	input--;       
@@ -320,46 +308,38 @@ void Sort(RenderResources& res, unsigned int objectAmount) {
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 }
 
-void UpdateFrame(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[], float boundsPosition[]) {
-	//Sort
-	unsigned int objectAmount=spheresArray.size();
-	// Physics update
+void UpdatePhysics(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[], float boundsPosition[]) {
+	unsigned int objectAmount = spheresArray.size();
 	res.physicsShader.Activate();
 	glUniform1f(res.physicsGravity, 10.0f);
 	glUniform1ui(res.physicsObjectAmount, objectAmount);
 	glUniform3f(res.physicsBounds, bounds[0], bounds[1], bounds[2]);
 	glUniform3f(res.physicsBoundsPosition, boundsPosition[0], boundsPosition[1], boundsPosition[2]);
-	glDispatchCompute(GLuint(objectAmount / threadCount+1), 1, 1);
-	GLenum err = glGetError();
-	if (err != GL_NO_ERROR) {
-		std::cerr << "Physics dispatch failed with error code: " << err << std::endl;
-	}
+
+	glDispatchCompute(objectAmount / threadCount + 1, 1, 1);
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-	Sort(res, objectAmount);
+	Sort(res, objectAmount); // keep sorting tied to physics
+}
 
+void RenderFrame(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[], float boundsPosition[]) {
+	unsigned int objectAmount = spheresArray.size();
 	res.renderShader.Activate();
-	glUniform1f(res.renderHalfFov, FOV/2);
+	glUniform1f(res.renderHalfFov, FOV / 2);
 	glUniform1ui(res.renderObjectAmount, objectAmount);
 	glUniform3f(res.renderBounds, bounds[0], bounds[1], bounds[2]);
 	glUniform3f(res.renderBoundsPosition, boundsPosition[0], boundsPosition[1], boundsPosition[2]);
-	glDispatchCompute((SCREEN_WIDTH + 31) / 32,	(SCREEN_HEIGHT + 31) / 32,	1);
 
-	err = glGetError();
-	if (err != GL_NO_ERROR) {
-		std::cerr << "Render dispatch failed with error code: " << err << std::endl;
-	}
-	//Draw on screen
+	glDispatchCompute((SCREEN_WIDTH + 31) / 32, (SCREEN_HEIGHT + 31) / 32, 1);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
 	res.screenShader.Activate();
 	glBindTextureUnit(0, res.screenTex);
-	const char* texture = "screen";
-	res.screenShader.GetTexture(texture);
+	res.screenShader.GetTexture("screen");
 	glBindVertexArray(res.VAO);
-	glDrawElements(GL_TRIANGLES,
-		sizeof(indices) / sizeof(indices[0]),
-		GL_UNSIGNED_INT,
-		0);
+	glDrawElements(GL_TRIANGLES, sizeof(indices) / sizeof(indices[0]), GL_UNSIGNED_INT, 0);
 }
+
 
 int main() {
 
@@ -374,28 +354,36 @@ int main() {
 	glfwSwapInterval(vSync);
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
-	float bounds[3] = { 10.f, 7.f, 7.0f };
-	float center[3] = { 0.f, 7.f, 0.f };
-	int amount =5000;
+	float bounds[3] = { 30.f, 20.f, 10.f };
+	float center[3] = { 0.f, 30.f, 0.f };
+	int amount =100000;
 	std::vector<Sphere> spheres = CreateSphereArray(center, bounds, amount);
 	std::vector<SphereIndex> spheresIndices;
 	std::vector<unsigned int> spatialIndices;
 	//create simulation bounds
-	float simulationBounds[3] = { 15.f, 7.f, 10.0f };
+	float simulationBounds[3] = { 40.f, 30.f, 12.5f };
 	float simulationBoundsPosition[3] = { 0, simulationBounds[1], 0 };
 	RenderResources res = InitRenderResources(spheres, spheresIndices,spatialIndices);
 
 	FrameTimer timer;
 	timer.Start();
 
-	const double targetDelta = 1.0 / 144.0;
-
+	const double targetDeltaPhysics = 1.0 / 144.0;
+	const double targetDeltaRender = 1 / 60;
+	double physicsTracker = 0;
+	double renderTracker = 0;
 	while (!glfwWindowShouldClose(window)) {
 		double frameStart = timer.Tick();
 
 		//UpdateFrame
-		UpdateFrame(res, spheres, simulationBounds, simulationBoundsPosition);
-
+		if (physicsTracker>targetDeltaPhysics){
+			UpdatePhysics(res, spheres, simulationBounds, simulationBoundsPosition);
+			physicsTracker = 0;
+		}
+		if (renderTracker > targetDeltaRender) {
+			RenderFrame(res, spheres, simulationBounds, simulationBoundsPosition);
+			renderTracker = 0;
+		}
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 
@@ -403,12 +391,8 @@ int main() {
 		double frameEnd = timer.GetDelta();
 		double elapsed = frameEnd;
 
-		if (elapsed < targetDelta) {
-			double sleepTime = targetDelta - elapsed;
-			std::this_thread::sleep_for(
-				std::chrono::duration<double>(sleepTime)
-			);
-		}
+		physicsTracker += elapsed;
+		renderTracker += elapsed;
 		float frametime = timer.GetDelta() * 1000.0f;
 		float fps = timer.GetFPS();
 		std::cout << "FPS: " << fps << "Frame Time:"<<frametime<<"\n";

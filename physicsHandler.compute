@@ -1,13 +1,13 @@
 #version 460 core
 
 const float PI=3.14159265359;
-const float targetDensity=10;
-const float pressureMultiplier=20;
-const float collisionDamping=0.5;
-const float deltaTime=1.f/60.f;
-const float viscousityMultiplier=1.0f;
+const float targetDensity=2;
+const float pressureMultiplier=5;
+const float collisionDamping=0.9;
+const float deltaTime=1.f/120.f;
+const float viscousityMultiplier=0.05f;
 const float foresight=1.f/60.f;
-const float nearPressureMultiplier=50.0f;
+const float nearPressureMultiplier=2.0f;
 struct SphereIndex{
     uint sphereIndex;
     uint hash;
@@ -34,6 +34,7 @@ layout(std430, binding = 2) buffer SphereIndexBuffer {
 layout(std430, binding = 3) buffer SpatialIndexBuffer {
     unsigned int spatialIndexData[];
 };
+
 layout(local_size_x = 32) in;
 uniform float gravity;
 uniform uint objectAmount;
@@ -129,7 +130,16 @@ float SmoothingKernel(float radius, float dst) {
 	}
 	return 0;
 }
-float NearDensityKernel(float dst, float radius)
+float DensityKernel(float radius, float dst){
+	if (dst < radius)
+	{
+		float scale = 15 / (2 * PI * pow(radius, 5));
+		float v = radius - dst;
+		return v * v * scale;
+	}
+	return 0;
+ }
+float NearDensityKernel(float radius,float dst)
 {
 	if (dst < radius)
 	{
@@ -181,14 +191,14 @@ void CalculateFutureSphereDensity(uint objectIndex){
             if (currIndexData.cellKey!=key) break;
             if (currIndexData.hash!=hash) continue;
             uint neighborIndex=currIndexData.sphereIndex;
-            float dst=max(length(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition),0.1);
-            density+=SmoothingKernel(objectData[neighborIndex].radius,dst);
+            float dst=max(length(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition),0.001);
+            density+=DensityKernel(objectData[neighborIndex].radius,dst);
             nearDensity+=NearDensityKernel(objectData[neighborIndex].radius,dst);
         }
     
     }
-    objectData[objectIndex].density=max(density,1);
-    objectData[objectIndex].nearDensity=max(nearDensity,1);
+    objectData[objectIndex].density=max(density,0.2);
+    objectData[objectIndex].nearDensity=max(nearDensity,0.2);
     return;
 }
 float ConvertDensityToPressure(float d){
@@ -202,9 +212,9 @@ float ConverNearDensityToPressure(float nearDensity)
 
 vec3 CalculatePressureForce(uint objectIndex){
     vec3 pressureForce=vec3(0,0,0);
-    float currD=max(objectData[objectIndex].density,1);
+    float currD=max(objectData[objectIndex].density,0.2);
     float currPressure=ConvertDensityToPressure(currD);
-    float currNearDensity=max(objectData[objectIndex].nearDensity,1);
+    float currNearDensity=max(objectData[objectIndex].nearDensity,0.2);
     float currNearPressure=ConverNearDensityToPressure(currD);
     ivec3 currCell=GetCell3D(objectIndex);    
     //objectData[objectIndex].color.xyz=vec3(currCell)/3;
@@ -220,18 +230,18 @@ vec3 CalculatePressureForce(uint objectIndex){
             if (currIndexData.hash!=hash) continue;
             uint neighborIndex=currIndexData.sphereIndex;
             if (neighborIndex==objectIndex) continue;
-            vec3 dir=(objectData[neighborIndex].position-objectData[objectIndex].position);
+            vec3 dir=(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition);
             float dst=length(dir);
             uint seed=uint(objectData[neighborIndex].density*65436);
             //dir = dst == 0 ? GetRandomDirection(seed) : normalize(dir);
             dir = dst == 0 ? vec3(0,1,0) : normalize(dir);
             float slope=DensityDerivative(objectData[neighborIndex].radius,dst);
-            float neighborDensity=max(objectData[neighborIndex].density,1);
+            float neighborDensity=max(objectData[neighborIndex].density,0.2);
             float sharedPressure=(ConvertDensityToPressure(neighborDensity)+currPressure)*0.5;
             pressureForce+=sharedPressure*dir*slope/neighborDensity;
 
             float nearSlope=NearDensityDerivative(objectData[neighborIndex].radius,dst);
-            float neighborNearDensity=max(objectData[neighborIndex].nearDensity,1);
+            float neighborNearDensity=max(objectData[neighborIndex].nearDensity,0.2);
             float sharedNearPressure=(ConverNearDensityToPressure(neighborNearDensity)+currNearPressure)*0.5;
             pressureForce+=sharedNearPressure*dir*nearSlope/neighborNearDensity;
         }
@@ -255,10 +265,11 @@ vec3 CalculateViscousityForce(uint objectIndex){
             if (currIndexData.hash!=hash) continue;
             uint neighborIndex=currIndexData.sphereIndex;
             if (neighborIndex==objectIndex) continue;
-            vec3 dir=(objectData[neighborIndex].position-objectData[objectIndex].position);
+            vec3 dir=(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition);
             float dst=length(dir);
+            if (dst>objectData[objectIndex].radius) continue;
             float influence=SmoothingKernel(objectData[neighborIndex].radius,dst);
-            float d = max(objectData[objectIndex].density, 1);
+            float d = max(objectData[objectIndex].density, 0.2);
             vec3 diff=objectData[neighborIndex].velocity-objectData[objectIndex].velocity;
             viscousityForce+=diff*influence*viscousityMultiplier*d;    
         }
@@ -287,13 +298,12 @@ void Collision(uint objectIndex){
     
 }
 vec3 PredictPosition(uint objectIndex){
-    vec3 predictedVelocity=objectData[objectIndex].velocity+vec3(0,-gravity*deltaTime,0);
+    vec3 predictedVelocity=objectData[objectIndex].velocity;
     vec3 predictedPosition=objectData[objectIndex].position+predictedVelocity*foresight;
     return predictedPosition;
 }
 void UpdateSpatialHash(uint objectIndex){
     if (objectIndex>objectAmount) return;
-    spatialIndexData[objectIndex]=objectAmount;
     uint hash=HashCell3D(GetCell3D(objectIndex));
     uint key=KeyFromHash(hash);
     indexData[objectIndex].sphereIndex=objectIndex;
@@ -301,9 +311,18 @@ void UpdateSpatialHash(uint objectIndex){
     indexData[objectIndex].cellKey=key;
     }
 void main() {
+
+    //memoryBarrierBuffer();
+    //barrier();
     uint i = gl_GlobalInvocationID.x;
     //i=objectAmount-i-1;
+
+    //gravity
+    
+    objectData[i].velocity.y -= gravity*deltaTime;
+
     //pressure
+    
     CalculateFutureSphereDensity(i);
     float currDensity= objectData[i].density;
     objectData[i].density=currDensity;
@@ -332,9 +351,7 @@ void main() {
     
     //update next prediction
 
-    //gravity
     
-    objectData[i].velocity.y -= gravity*deltaTime;
      //color debugging
      
     //objectData[i].color.xyz=vec3(GetCell3D(i))/5;
@@ -342,4 +359,6 @@ void main() {
     objectData[i].color.xyz = mix(vec3(0, 0.5, 1), vec3(1, 0.5, 0), weight);
     objectData[i].color.xyz = mix(objectData[i].color.xyz, vec3(1, 0.0, 0), weight);
     //objectData[i].color.xyz=(1-1/log(objectData[i].debug)).xxx;
+    //memoryBarrierBuffer();
+    //barrier();
 }
