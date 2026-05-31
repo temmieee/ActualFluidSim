@@ -1,10 +1,16 @@
 #version 460 core
-
+const float PI=3.14159265359;
 struct Ray {
     vec3 origin;
     vec3 direction;
+    vec3 inverseDir;
 };
-
+struct SphereIndex{
+    uint sphereIndex;
+    uint hash;
+    uint cellKey;
+    uint debug;
+};
 struct Sphere {
     vec3 position;
     float radius;
@@ -12,7 +18,7 @@ struct Sphere {
     vec3 velocity;
     float density;
     vec3 predictedPosition;
-    float debug;
+    float nearDensity;
 };
 
 struct HitInfo {
@@ -21,16 +27,86 @@ struct HitInfo {
     int sphereIndex;
 };
 
-layout (std430, binding = 1) buffer spheresBuffer {
-    Sphere spheresData[];
+struct RaymarchHitInfo{
+    vec3 position;
+    vec3 normal;
+    bool hit;
+    float depth;
 };
-
+layout (std430, binding = 1) buffer spheresBuffer {
+    Sphere objectData[];
+};
+layout(std430, binding = 2) buffer SphereIndexBuffer {
+    SphereIndex indexData[];
+};
+layout(std430, binding = 3) buffer SpatialIndexBuffer {
+    unsigned int spatialIndexData[];
+};
 layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 layout (rgba32f, binding = 0) uniform image2D screen;
 
 uniform float halffov;
 uniform uint objectAmount;
+uniform vec3 bounds;
+uniform vec3 boundsPosition;
 
+//spatial hashing
+const ivec3 offsets3D[] =
+{
+    ivec3(-1, -1, -1),
+	ivec3(-1, -1, 0),
+	ivec3(-1, -1, 1),
+	ivec3(-1, 0, -1),
+	ivec3(-1, 0, 0),
+	ivec3(-1, 0, 1),
+	ivec3(-1, 1, -1),
+	ivec3(-1, 1, 0),
+	ivec3(-1, 1, 1),
+	ivec3(0, -1, -1),
+	ivec3(0, -1, 0),
+	ivec3(0, -1, 1),
+	ivec3(0, 0, -1),
+	ivec3(0, 0, 0),
+	ivec3(0, 0, 1),
+	ivec3(0, 1, -1),
+	ivec3(0, 1, 0),
+	ivec3(0, 1, 1),
+	ivec3(1, -1, -1),
+	ivec3(1, -1, 0),
+	ivec3(1, -1, 1),
+	ivec3(1, 0, -1),
+	ivec3(1, 0, 0),
+	ivec3(1, 0, 1),
+	ivec3(1, 1, -1),
+	ivec3(1, 1, 0),
+	ivec3(1, 1, 1)
+};
+
+// Constants used for hashing
+const uint hashK1 = 15823;
+const uint hashK2 = 9737333;
+const uint hashK3 = 440817757;
+
+// Convert floating point position into an integer cell coordinate
+ivec3 GetCell3D(uint objectIndex)
+{
+    return ivec3(floor(objectData[objectIndex].predictedPosition /objectData[objectIndex].radius));
+}
+ivec3 GetCell3DPosition(vec3 position)
+{
+    return ivec3(floor(position /objectData[0].radius));
+}
+// Hash cell coordinate to a single unsigned integer
+uint HashCell3D(ivec3 cell)
+{
+    cell = ivec3(uvec3(cell));
+    return (cell.x * hashK1) + (cell.y * hashK2) + (cell.z * hashK3);
+}
+
+uint KeyFromHash(uint hash)
+{
+    return hash%objectAmount;
+}
 float RandomValue(inout uint seed) {
     seed *= (seed + 195439) * (seed + 124395) * (seed + 845921);
     return seed / 4294967295.0;
@@ -55,11 +131,29 @@ float sdUnionNSpheres(vec3 p) {
     float globalDistance = 1000000.0;
 
     for (int i = 0; i < objectAmount; ++i) {
-        float dist = sdSphere(p, spheresData[i].position, spheresData[i].radius);
+        float dist = sdSphere(p, objectData[i].position, objectData[i].radius);
         globalDistance = min(globalDistance, dist);
     }
 
     return globalDistance;
+}
+float BoundsTest(Ray ray, out float tNear, out float tFar){
+	float dist=-1;
+    vec3 maxBound=boundsPosition+bounds;
+    vec3 minBound=boundsPosition-bounds;
+	vec3 t1=(maxBound-ray.origin)*ray.inverseDir;
+	vec3 t2=(minBound-ray.origin)*ray.inverseDir;
+	 // Use min/max to ensure tMin is the closest intersection
+    vec3 tMin = min(t1, t2);
+	vec3 tMax = max(t1, t2);
+	 //Get the highest tMin and lowest tMax among all axes
+    tNear = max(max(tMin.x, tMin.y), tMin.z);
+	tFar = min(min(tMax.x, tMax.y), tMax.z);
+	// Collision occurs if tNear <= tFar and the box is in front of the ray
+   if ((tNear <= tFar) && (tFar > 0)){
+	dist = tNear>0? tNear:tFar;
+	}
+	return dist;
 }
 HitInfo GetHitInfoFromRay(Ray ray) {
     HitInfo hitInfo;
@@ -68,15 +162,15 @@ HitInfo GetHitInfoFromRay(Ray ray) {
     hitInfo.sphereIndex = -1;
     float distance = 99999999.0;
 
-    for (int i = 0; i < objectAmount; i+=1) {
-        vec3 oc = ray.origin - spheresData[i].position;
+    for (int i = 0; i < objectAmount; i+=10) {
+        vec3 oc = ray.origin - objectData[i].position;
         float a = 2 * dot(ray.direction, oc);
         if (a > 0.0) continue;
-        float b = dot(oc, oc) - spheresData[i].radius * spheresData[i].radius*0.1;
+        float b = dot(oc, oc) - objectData[i].radius * objectData[i].radius*0.1;
         float intersectionState = a * a - 4 * b;
         float curDistance = (-a - sqrt(intersectionState)) / 2;
         vec3 intersection = ray.origin + ray.direction * curDistance;
-        vec3 normalTemp = normalize(intersection - spheresData[i].position);
+        vec3 normalTemp = normalize(intersection - objectData[i].position);
 
         if ((intersectionState >= 0.0) && (distance > curDistance)) {
             hitInfo.normal = normalTemp;
@@ -89,6 +183,62 @@ HitInfo GetHitInfoFromRay(Ray ray) {
 }
 
 
+float SmoothingKernel(float radius, float dst) {
+  	if (dst < radius)
+	{
+		float scale = 315 / (64 * PI * pow(abs(radius), 9));
+		float v = radius * radius - dst * dst;
+		return v * v * v * scale;
+	}
+	return 0;
+}
+
+float SampleDensityAtPosition(vec3 position){
+    float density=0.0;
+    //for(uint i=0;i<objectAmount;++i){
+     //   float dst=max(length(objectData[objectIndex].predictedPosition-objectData[i].predictedPosition),0.1);
+        //density+=SmoothingKernel(objectData[i].radius,dst)*0.01f;
+    //}
+
+    ivec3 currCell=GetCell3DPosition(position);    
+    //objectData[objectIndex].color.xyz=vec3(currCell)/3;
+    for (uint cellOffsetIndex=0;cellOffsetIndex<27;cellOffsetIndex++){
+        uint hash=HashCell3D(currCell+offsets3D[cellOffsetIndex]);
+        uint key=KeyFromHash(hash);
+        uint spatialIndex=spatialIndexData[key];
+        while (spatialIndex<objectAmount)
+        {
+            
+            SphereIndex currIndexData=indexData[spatialIndex];
+            spatialIndex++;
+            if (currIndexData.cellKey!=key) break;
+            if (currIndexData.hash!=hash) continue;
+            uint neighborIndex=currIndexData.sphereIndex;
+            float dst=max(length(objectData[neighborIndex].position-position),0.1);
+            density+=SmoothingKernel(objectData[neighborIndex].radius,dst);
+            //if (density>0.1) break;
+        }
+    
+    }
+    return density;
+}
+RaymarchHitInfo GetRaymarchHitInfoFromRay(Ray ray){
+    RaymarchHitInfo raymarchHitInfo;
+    raymarchHitInfo.hit=false;
+    raymarchHitInfo.position=vec3(0,0,0);
+    raymarchHitInfo.depth=0;
+    float tNear=0;
+    float tFar=0;
+    float boxDist=BoundsTest(ray,tNear,tFar);
+    if (boxDist<1) return raymarchHitInfo;
+    raymarchHitInfo.hit=true;
+    //raymarchHitInfo.position=ray.origin+ray.direction*tNear;
+    while (tNear<tFar){
+        raymarchHitInfo.depth+=SampleDensityAtPosition(ray.origin+ray.direction*tNear);
+        tNear+=1;
+    }
+    return raymarchHitInfo;
+}
 void main() {
 
     ivec2 pixelCoords = ivec2(gl_GlobalInvocationID.xy);
@@ -97,41 +247,31 @@ void main() {
     float y = float(pixelCoords.y * 2 - dimensions.y) / float(dimensions.y);
     float x = float(pixelCoords.x * 2 - dimensions.x) / float(dimensions.y);
 
-    vec3 cameraPos = vec3(0, 0.0, -10.0);
+    vec3 cameraPos = vec3(0, 7.0, -30);
     vec3 rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
     vec3 rayDir = normalize(rayOrigin - cameraPos);
 
     vec3 light = vec3(0,0,0);
     uint repetition = 1;
-
+    vec3 debug=vec3(0,0,0);
+    
     for (int i = 0; i < repetition; i++) {
         vec3 tempCol = vec3(1,1,1);
         rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
         rayDir = normalize(rayOrigin - cameraPos);
-
         for (int j = 0; j < 1; j++) {
             Ray ray;
             ray.origin = rayOrigin;
             ray.direction = rayDir;
-
-            HitInfo hitInfo = GetHitInfoFromRay(ray);
-            if (hitInfo.sphereIndex == -1) {
-                tempCol = vec3(0,0,0);
-                break;
-            }
-
-            rayOrigin = hitInfo.position + hitInfo.normal * 0.001; // small offset
-            uint rng = pixelCoords.x + pixelCoords.y * dimensions.x + dimensions.x * dimensions.y * i;
-
-            // simple diffuse bounce
-            rayDir = normalize(reflect(rayDir, hitInfo.normal) + GetRandomDirection(rng) * 0.2);
-
+            ray.inverseDir=1/rayDir;
+            RaymarchHitInfo raymarchHitInfo=GetRaymarchHitInfoFromRay(ray);
+            if (raymarchHitInfo.hit) debug=raymarchHitInfo.depth.xxx/100;
             // accumulate color from sphere
-            tempCol *= spheresData[hitInfo.sphereIndex].color.xyz;
+            //tempCol *= objectData[hitInfo.sphereIndex].color.xyz;
         }
-        light += tempCol / repetition;
+        //light += tempCol / repetition;
+        light=debug;
     }
-
     vec4 pixel = vec4(light, 1.0);
     imageStore(screen, pixelCoords, pixel);
 }

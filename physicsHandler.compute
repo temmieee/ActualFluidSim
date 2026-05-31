@@ -2,12 +2,12 @@
 
 const float PI=3.14159265359;
 const float targetDensity=10;
-const float pressureMultiplier=15;
-const float collisionDamping=-0.6;
+const float pressureMultiplier=20;
+const float collisionDamping=0.5;
 const float deltaTime=1.f/60.f;
-const float viscousityMultiplier=0.2f;
+const float viscousityMultiplier=1.0f;
 const float foresight=1.f/60.f;
-
+const float nearPressureMultiplier=50.0f;
 struct SphereIndex{
     uint sphereIndex;
     uint hash;
@@ -22,7 +22,7 @@ struct Sphere {
     vec3 velocity;
     float density;
     vec3 predictedPosition;
-    float debug;
+    float nearDensity;
 };
 
 layout(std430, binding = 1) buffer SphereBuffer {
@@ -38,6 +38,7 @@ layout(local_size_x = 32) in;
 uniform float gravity;
 uniform uint objectAmount;
 uniform vec3 bounds;
+uniform vec3 boundsPosition;
 
 //spatial hashing
 const ivec3 offsets3D[] =
@@ -91,7 +92,7 @@ uint HashCell3D(ivec3 cell)
 
 uint KeyFromHash(uint hash)
 {
-    return hash % objectAmount;
+    return hash%objectAmount;
 }
 uint NextRandom(inout uint state)
 {
@@ -128,8 +129,27 @@ float SmoothingKernel(float radius, float dst) {
 	}
 	return 0;
 }
-float SmoothingKernelDerivative(float radius, float dst){
-    if (dst <= radius)
+float NearDensityKernel(float dst, float radius)
+{
+	if (dst < radius)
+	{
+		float scale = 15 / (PI * pow(radius, 6));
+		float v = radius - dst;
+		return v * v * v * scale;
+	}
+	return 0;
+}
+float DensityDerivative(float radius, float dst){
+   if (dst <= radius)
+	{
+		float scale = 15 / (pow(radius, 5) * PI);
+		float v = radius - dst;
+		return -v * scale;
+	}
+	return 0;
+}
+float NearDensityDerivative(float radius, float dst){
+   if (dst <= radius)
 	{
 		float scale = 45 / (pow(radius, 6) * PI);
 		float v = radius - dst;
@@ -137,40 +157,11 @@ float SmoothingKernelDerivative(float radius, float dst){
 	}
 	return 0;
 }
-float CalculatePointDensity(vec3 position){
+
+
+void CalculateFutureSphereDensity(uint objectIndex){
     float density=0.0;
-    for(uint i=0;i<objectAmount;++i){
-        float dst=max(length(position-objectData[i].position),0.1);
-        density+=SmoothingKernel(objectData[i].radius,dst);
-    }
-    return density;
-}
-float CalculateSphereDensity(uint objectIndex){
-    float density=0.0;
-    //for(uint i=0;i<objectAmount;++i){
-    //    float dst=max(length(objectData[objectIndex].position-objectData[i].position),0.1);
-       // density+=SmoothingKernel(objectData[i].radius,dst);
-    //}
-    ivec3 currCell=GetCell3D(objectIndex);
-      for (uint cellOffsetIndex=0;cellOffsetIndex<27;cellOffsetIndex++){
-        uint hash=HashCell3D(currCell+offsets3D[cellOffsetIndex]);
-        uint key=KeyFromHash(hash);
-        uint spatialIndex=spatialIndexData[key];
-        while (spatialIndex<objectAmount)
-        {
-            if (indexData[spatialIndex].cellKey!=key) break;
-            if (indexData[spatialIndex].hash!=hash) continue;
-            uint neighborIndex=indexData[spatialIndex].sphereIndex;
-            float dst=max(length(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition),0.1);
-            density+=SmoothingKernel(objectData[neighborIndex].radius,dst);
-            spatialIndex++;
-        }
-    }
-   
-    return density;
-}
-float CalculateFutureSphereDensity(uint objectIndex){
-    float density=1.0;
+    float nearDensity=0.0;
     //for(uint i=0;i<objectAmount;++i){
      //   float dst=max(length(objectData[objectIndex].predictedPosition-objectData[i].predictedPosition),0.1);
         //density+=SmoothingKernel(objectData[i].radius,dst)*0.01f;
@@ -190,35 +181,31 @@ float CalculateFutureSphereDensity(uint objectIndex){
             if (currIndexData.cellKey!=key) break;
             if (currIndexData.hash!=hash) continue;
             uint neighborIndex=currIndexData.sphereIndex;
-            if (neighborIndex==objectIndex) continue;
             float dst=max(length(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition),0.1);
             density+=SmoothingKernel(objectData[neighborIndex].radius,dst);
+            nearDensity+=NearDensityKernel(objectData[neighborIndex].radius,dst);
         }
+    
     }
-    return density;
+    objectData[objectIndex].density=max(density,1);
+    objectData[objectIndex].nearDensity=max(nearDensity,1);
+    return;
 }
 float ConvertDensityToPressure(float d){
-    float densityError=d-targetDensity;
-    float pressure=densityError*pressureMultiplier;
-    return pressure;
+    float densityDiff=d-targetDensity;
+    return densityDiff*pressureMultiplier;
+}
+float ConverNearDensityToPressure(float nearDensity)
+{
+	return nearDensity * nearPressureMultiplier;
 }
 
 vec3 CalculatePressureForce(uint objectIndex){
     vec3 pressureForce=vec3(0,0,0);
-    //pressureForce+=GetRandomDirection(objectIndex)*0.1;
-    //for (uint i=0;i<objectAmount;i++){
-    //    if (i==objectIndex) continue;
-    //    vec3 dir=(objectData[i].position-objectData[objectIndex].position);
-    //    float dst=length(dir);
-    //    uint seed=uint(objectData[i].density*6546436);
-    //    dir = dst == 0 ? GetRandomDirection(seed) : normalize(dir);
-    //    float slope=SmoothingKernelDerivative(objectData[i].radius,dst);
-    //    float d=max(objectData[i].density,1);
-    //    float currD=max(objectData[objectIndex].density,1);
-    //    float sharedPressure=(ConvertDensityToPressure(d)+ConvertDensityToPressure(currD))*0.5;
-    //    //pressureForce+=sharedPressure*dir*slope/d*0.0001;
-    //}
-
+    float currD=max(objectData[objectIndex].density,1);
+    float currPressure=ConvertDensityToPressure(currD);
+    float currNearDensity=max(objectData[objectIndex].nearDensity,1);
+    float currNearPressure=ConverNearDensityToPressure(currD);
     ivec3 currCell=GetCell3D(objectIndex);    
     //objectData[objectIndex].color.xyz=vec3(currCell)/3;
     for (uint cellOffsetIndex=0;cellOffsetIndex<27;cellOffsetIndex++){
@@ -235,16 +222,21 @@ vec3 CalculatePressureForce(uint objectIndex){
             if (neighborIndex==objectIndex) continue;
             vec3 dir=(objectData[neighborIndex].position-objectData[objectIndex].position);
             float dst=length(dir);
-            uint seed=uint(objectData[neighborIndex].density*6546436);
-            dir = dst == 0 ? GetRandomDirection(seed) : normalize(dir);
-            float slope=SmoothingKernelDerivative(objectData[neighborIndex].radius,dst);
-            float d=max(objectData[neighborIndex].density,1);
-            float currD=max(objectData[objectIndex].density,1);
-            float sharedPressure=(ConvertDensityToPressure(d)+ConvertDensityToPressure(currD))*0.5;
-            pressureForce+=sharedPressure*dir*slope/d;
+            uint seed=uint(objectData[neighborIndex].density*65436);
+            //dir = dst == 0 ? GetRandomDirection(seed) : normalize(dir);
+            dir = dst == 0 ? vec3(0,1,0) : normalize(dir);
+            float slope=DensityDerivative(objectData[neighborIndex].radius,dst);
+            float neighborDensity=max(objectData[neighborIndex].density,1);
+            float sharedPressure=(ConvertDensityToPressure(neighborDensity)+currPressure)*0.5;
+            pressureForce+=sharedPressure*dir*slope/neighborDensity;
 
+            float nearSlope=NearDensityDerivative(objectData[neighborIndex].radius,dst);
+            float neighborNearDensity=max(objectData[neighborIndex].nearDensity,1);
+            float sharedNearPressure=(ConverNearDensityToPressure(neighborNearDensity)+currNearPressure)*0.5;
+            pressureForce+=sharedNearPressure*dir*nearSlope/neighborNearDensity;
         }
     }
+    
     return pressureForce;
 }
 vec3 CalculateViscousityForce(uint objectIndex){
@@ -274,23 +266,25 @@ vec3 CalculateViscousityForce(uint objectIndex){
     return viscousityForce;
 }
 void Collision(uint objectIndex){
-if (abs(objectData[objectIndex].position.x) > bounds.x) {
-        objectData[objectIndex].position.x = sign(objectData[objectIndex].position.x) * bounds.x;
-        objectData[objectIndex].velocity.x *= collisionDamping;
-        //objectData[i].velocity *= 0.9;
+    vec3 relativePos=objectData[objectIndex].position-boundsPosition;
+    if (abs(relativePos.x)+objectData[objectIndex].radius > bounds.x) {
+        objectData[objectIndex].position.x = sign(relativePos.x) * (bounds.x-objectData[objectIndex].radius)+boundsPosition.x;
+        objectData[objectIndex].velocity.x *= -collisionDamping;
+        //objectData[objectIndex].velocity *= 0.9;
 
     }
-    if (abs(objectData[objectIndex].position.y) > bounds.y) {
-        objectData[objectIndex].position.y = sign(objectData[objectIndex].position.y) * bounds.y;
-        objectData[objectIndex].velocity.y *= collisionDamping;
-        //objectData[i].velocity *= 0.9;
+    if (abs(relativePos.y)+objectData[objectIndex].radius > bounds.y) {
+        objectData[objectIndex].position.y = sign(relativePos.y) * (bounds.y-objectData[objectIndex].radius)+boundsPosition.y;
+        objectData[objectIndex].velocity.y *= -collisionDamping;
+        //objectData[objectIndex].velocity *= 0.9;
         
     }
-    if (abs(objectData[objectIndex].position.z) > bounds.z) {
-        objectData[objectIndex].position.z = sign(objectData[objectIndex].position.z) * bounds.z;
-        objectData[objectIndex].velocity.z *= collisionDamping;
-        //objectData[i].velocity *= 0.9;
+    if (abs(relativePos.z)+objectData[objectIndex].radius > bounds.z) {
+        objectData[objectIndex].position.z = sign(relativePos.z) * (bounds.z-objectData[objectIndex].radius)+boundsPosition.z;
+        objectData[objectIndex].velocity.z *= -collisionDamping;
+        //objectData[objectIndex].velocity *= 0.9;
     }
+    
 }
 vec3 PredictPosition(uint objectIndex){
     vec3 predictedVelocity=objectData[objectIndex].velocity+vec3(0,-gravity*deltaTime,0);
@@ -308,8 +302,10 @@ void UpdateSpatialHash(uint objectIndex){
     }
 void main() {
     uint i = gl_GlobalInvocationID.x;
+    //i=objectAmount-i-1;
     //pressure
-    float currDensity=CalculateFutureSphereDensity(i);
+    CalculateFutureSphereDensity(i);
+    float currDensity= objectData[i].density;
     objectData[i].density=currDensity;
     //objectData[i].color.xyz=currDensity.xxx/10;
      
