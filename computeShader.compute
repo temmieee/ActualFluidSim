@@ -1,10 +1,12 @@
 #version 460 core
 const float PI=3.14159265359;
 
-const vec3 scatteringCoefficients=vec3(1,0.5,0.25);
+const vec3 scatteringCoefficients=vec3(0.5,0.3,0.25);
 const vec3 sunDirection=normalize(vec3(2,1,2));
-const float lightMarchStepSize=2;
-const float maxLightTestDist=20;
+const float lightMarchStepSize = 5.5;
+const float raymarchStep = 1.25;
+const float maxLightTestDist=15;
+
 struct Ray {
     vec3 origin;
     vec3 direction;
@@ -48,12 +50,10 @@ layout(std430, binding = 2) buffer SphereIndexBuffer {
 layout(std430, binding = 3) buffer SpatialIndexBuffer {
     unsigned int spatialIndexData[];
 };
-layout(std430, binding = 4) buffer DensityBuffer{
-    float densities[];
-};
 
 layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 layout (rgba32f, binding = 0) uniform image2D screen;
+layout (binding = 0) uniform sampler3D densityTex;
 
 uniform float halffov;
 uniform uint objectAmount;
@@ -195,14 +195,12 @@ HitInfo GetHitInfoFromRay(Ray ray) {
 
 
 float DensityKernel(float radius, float dst){
-	if (dst < radius)
-	{
+	
 		float scale = 15 / (2 * PI * pow(radius, 5));
         //float scale=0.5;
-		float v = radius - dst;
-		return  v * 0.1;
-	}
-	return 0;
+		float v = radius+0.5 - dst;
+        if (v < 0) return 0;
+		return  v * 0.2;
  }
  float SampleDensityAtPositionLight(vec3 position){
     float density=0.0;
@@ -228,7 +226,7 @@ float DensityKernel(float radius, float dst){
             float dst=max(length(objectData[neighborIndex].position-position),0.1);
             if (dst>objectData[neighborIndex].radius) continue;
             density+=DensityKernel(objectData[neighborIndex].radius,dst);
-            //if (density>3.0) break;
+            if (density>3.0) break;
         }
     
     }
@@ -264,35 +262,34 @@ float SampleDensityAtPosition(vec3 position){
     }
     return density;
 }
-float SampleDensityFromBuffer(vec3 position)
+
+float SampleDensityFromTexture(vec3 position)
 {
     const float epsilon = 0.0001;
     float density = 0.0;
-    vec3 interval = 2*bounds / resolution;
+    vec3 interval = 2 * bounds / resolution;
     vec3 root = boundsPosition - bounds;
     vec3 diff = position - root;
     vec3 uvw = diff / (2 * bounds);
-    bool isEdge = false;    
+    bool isEdge = false;
     if (any(lessThan(uvw, vec3(epsilon))) ||
     any(greaterThan(uvw, vec3(1.0 - epsilon))))
     {
         isEdge = true;
     }
-    if (isEdge) return -0.01;
+    if (isEdge)        return -0.00;
    
-    uvec3 coordinate = uvec3(diff / interval);
-    uint index = coordinate.x + coordinate.y * resolution.x + coordinate.z * resolution.x * resolution.y;
-    density += densities[index];
-    return density-0.01;
+    density =texture(densityTex, uvw).r;
+    return density - 0.025;
 }
 float DensityAlongRay(Ray ray, float step){
     float totalDensity=0;
-    float tNear=0.001;
+    float tNear=0.000;
     float tFar = maxLightTestDist;
     tFar -= step * 0.5;
     while (tNear<tFar){
-        float density=SampleDensityFromBuffer(ray.origin+ray.direction*tNear)*step;
-        //if (density<0.1) break;
+        float density = SampleDensityFromTexture(ray.origin + ray.direction * tNear) * step;
+        if (density<0.1) break;
         totalDensity+=density;
         tNear+=step;
     }
@@ -311,12 +308,12 @@ RaymarchHitInfo GetRaymarchHitInfoFromRay(Ray ray){
     raymarchHitInfo.hit=true;
     tNear+=0.01;
     //raymarchHitInfo.position=ray.origin+ray.direction*tNear;
-    float step=0.5;
+    float step=raymarchStep;
     tFar -= step * 0.5;
     while (tNear<tFar){
         vec3 samplePos=ray.origin+ray.direction*tNear;
         //float density=SampleDensityAtPosition(samplePos)*step;
-        float density = SampleDensityFromBuffer(samplePos) * step;
+        float density = SampleDensityFromTexture(samplePos) * step;
         raymarchHitInfo.depth+=density;
         Ray sunRay;
         sunRay.origin=samplePos;

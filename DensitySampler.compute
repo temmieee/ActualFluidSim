@@ -1,10 +1,7 @@
 #version 460 core
 const float PI = 3.14159265359;
 
-const vec3 scatteringCoefficients = vec3(2, 1, 01);
-const vec3 sunDirection = normalize(vec3(1, 1, 0));
-const float lightMarchStepSize = 2;
-const float maxLightTestDist = 20;
+
 
 struct SphereIndex
 {
@@ -37,10 +34,8 @@ layout(std430, binding = 3) buffer SpatialIndexBuffer
 {
 	unsigned int spatialIndexData[];
 };
-layout(std430, binding = 4) buffer DensityBuffer
-{
-	float densities[];
-};
+
+layout(r32f, binding = 4) uniform image3D densityTex;
 layout (local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
 
 uniform uint objectAmount;
@@ -112,9 +107,9 @@ float DensityKernel(float radius, float dst)
 	
 		float scale = 15 / (2 * PI * pow(radius, 5));
         //float scale=0.5;
-		float v = radius-0.1 - dst;
+		float v = radius+0.1 - dst;
 		if (v < 0) return 0;
-		return v * 0.1;
+		return v * 0.2;
 }
 float SampleDensityAtPosition(vec3 position)
 {
@@ -141,7 +136,7 @@ float SampleDensityAtPosition(vec3 position)
 			if (dst > objectData[neighborIndex].radius)
 				continue;
 			density += DensityKernel(objectData[neighborIndex].radius, dst);
-			if (density > 1) break;
+			if (density > 0.5) break;
 		}
     
 	}
@@ -155,7 +150,6 @@ void main()
 	vec3 root = boundsPosition - bounds;
 	vec3 samplePosition = interval / 2 + vec3(interval.x * coordinate.x, interval.y * coordinate.y, interval.z * coordinate.z) + root;
 	float density = SampleDensityAtPosition(samplePosition);
-	uint index = coordinate.x + coordinate.y * resolution.x + coordinate.z * resolution.x * resolution.y;
-	densities[index] = density;
+	imageStore(densityTex, coordinate, vec4(density));
 
 }

@@ -123,6 +123,7 @@ struct RenderResources {
 	GLuint spatialBuffer;
 	GLuint spatialIndexBuffer;
 	GLuint densityBuffer;
+	GLuint densityTex;
 
 	GLuint physicsObjectAmount;
 	GLuint physicsGravity;
@@ -150,7 +151,7 @@ struct RenderResources {
 	RenderResources(const char* vertPath,	const char* fragPath,	const char* renderComputePath,	const char* physicsComputePath, const char* sortComputePath, const char* densityComputePath)
 		: screenShader(vertPath, fragPath),	renderShader(renderComputePath), physicsShader(physicsComputePath), sortShader(sortComputePath), densityShader(densityComputePath),
 		spheresBuffer(0), spatialBuffer(0), spatialIndexBuffer(0), densityBuffer(0),
-		physicsObjectAmount(0), renderObjectAmount(0), sortObjectAmount(0), physicsGravity(0), physicsBounds(0), renderHalfFov(0), sortGroupWidth(0), sortGroupHeight(0), sortStepIndex(0), physicsBoundsPosition(0), renderBounds(0), renderBoundsPosition(0), densityBounds(0), densityBoundsPosition(0), densityResolution(0), densityObjectAmount(0), renderResolution(0),
+		physicsObjectAmount(0), renderObjectAmount(0), sortObjectAmount(0), physicsGravity(0), physicsBounds(0), renderHalfFov(0), sortGroupWidth(0), sortGroupHeight(0), sortStepIndex(0), physicsBoundsPosition(0), renderBounds(0), renderBoundsPosition(0), densityBounds(0), densityBoundsPosition(0), densityResolution(0), densityObjectAmount(0), renderResolution(0), densityTex(0),
 		screenTex(0), VAO(0), VBO(0), EBO(0) {
 	}
 };
@@ -163,7 +164,6 @@ void CleanupRenderResources(RenderResources& res) {
 	glDeleteBuffers(1, &res.spheresBuffer);
 	glDeleteBuffers(1, &res.spatialBuffer);
 	glDeleteBuffers(1, &res.spatialIndexBuffer);
-	glDeleteBuffers(1, &res.densityBuffer);
 
 	res.renderShader.Delete();
 	res.physicsShader.Delete();
@@ -171,7 +171,7 @@ void CleanupRenderResources(RenderResources& res) {
 	res.sortShader.Delete();
 }
 
-RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vector<SphereIndex>& spatialArray, std::vector<unsigned int>& spatialIndexArray, std::vector<float> densities, unsigned int densityResolution[]) {
+RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vector<SphereIndex>& spatialArray, std::vector<unsigned int>& spatialIndexArray,unsigned int densityResolution[]) {
 	RenderResources res("default.vert", "default.frag", "computeShader.compute","physicsHandler.compute", "GPUSort.compute","DensitySampler.compute");
 
 	glCreateVertexArrays(1, &res.VAO);
@@ -201,6 +201,19 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 	glTextureStorage2D(res.screenTex, 1, GL_RGBA32F, SCREEN_WIDTH, SCREEN_HEIGHT);
 	glBindImageTexture(0, res.screenTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
+
+	glCreateTextures(GL_TEXTURE_3D, 1, &res.densityTex);
+	glTextureStorage3D(res.densityTex, 1, GL_R16F, densityResolution[0], densityResolution[1], densityResolution[2]);
+
+	glTextureParameteri(res.densityTex, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTextureParameteri(res.densityTex, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	glTextureParameteri(res.densityTex, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTextureParameteri(res.densityTex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTextureParameteri(res.densityTex, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+	glBindImageTexture(4,res.densityTex,0,GL_TRUE,0,GL_WRITE_ONLY, GL_R16F);
+
 	//init buffer
 	unsigned int amount = spheresArray.size();
 
@@ -210,9 +223,7 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 		spatialIndexArray.push_back(amount+1);
 	}
 	double totalDensityResolution = densityResolution[0] * densityResolution[1] * densityResolution[2];
-	for (unsigned int i = 0; i < densityResolution[0] * densityResolution[1] * densityResolution[2]; i++) {
-		densities.push_back(0);
-	}
+	
 	glCreateBuffers(1, &res.spheresBuffer);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, res.spheresBuffer);
 	glBufferData(GL_SHADER_STORAGE_BUFFER,
@@ -238,15 +249,6 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 		spatialIndexArray.data(),
 		GL_DYNAMIC_COPY);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, res.spatialIndexBuffer);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-
-	glCreateBuffers(1, &res.densityBuffer);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, res.densityBuffer);
-	glBufferData(GL_SHADER_STORAGE_BUFFER,
-		totalDensityResolution * sizeof(float),
-		densities.data(),
-		GL_DYNAMIC_COPY);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, res.densityBuffer);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 	//get uniform location
@@ -277,7 +279,7 @@ void CreateSphereArray(static std::vector<Sphere>& spheres, float center[], floa
 		float positionX = center[0] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[0];
 		float positionY = center[1] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[1];
 		float positionZ = center[2] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[2];
-		float radius = 1.5f;
+		float radius = 1.25f;
 
 		float colorR = static_cast<float>(rand()) / RAND_MAX;
 		float colorG = static_cast<float>(rand()) / RAND_MAX;
@@ -368,6 +370,7 @@ void RenderFrame(RenderResources& res, std::vector<Sphere>& spheresArray, float 
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
 	res.renderShader.Activate();
+	glBindTextureUnit(0, res.densityTex);
 	glUniform1f(res.renderHalfFov, FOV / 2);
 	glUniform1ui(res.renderObjectAmount, objectAmount);
 	glUniform3f(res.renderBounds, bounds[0], bounds[1], bounds[2]);
@@ -399,25 +402,24 @@ int main() {
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
 	float bounds[3] = {30.f, 30.f, 10.f };
-	float center1[3] = { 0.f, 40.f, 0.f };
+	float center1[3] = { -30.f, 40.f, 0.f };
 	float center2[3] = { 45.f, 50.f, 0.f };
-	int amount =50000;
-	float simulationBounds[3] = { 60.f, 40.f, 20.f };
+	int amount =35000;
+	float simulationBounds[3] = { 60.f, 50.f, 10.f };
 	float simulationBoundsPosition[3] = { 0, simulationBounds[1], 0 };
-	unsigned int densityResolution[3] = { simulationBounds[0] * 7,simulationBounds[1] * 7 ,simulationBounds[2] * 7 };
+	unsigned int densityResolution[3] = { simulationBounds[0] * 8,simulationBounds[1] * 8,simulationBounds[2] * 8 };
 	std::vector<Sphere> spheres;
 	CreateSphereArray(spheres,center1, bounds, amount);
 	//CreateSphereArray(spheres, center2, bounds, amount);
 	std::vector<SphereIndex> spheresIndices;
 	std::vector<unsigned int> spatialIndices;
-	std::vector<float> densities;
 	//create simulation bounds
-	RenderResources res = InitRenderResources(spheres, spheresIndices,spatialIndices, densities, densityResolution);
+	RenderResources res = InitRenderResources(spheres, spheresIndices,spatialIndices, densityResolution);
 
 	FrameTimer timer;
 	timer.Start();
 
-	const double targetDeltaPhysics = 1.0 / 400;
+	const double targetDeltaPhysics = 1.0 / 500;
 	const double targetDeltaRender = 1.0 / 60.0;
 	double physicsTracker = 0;
 	double renderTracker = 0;

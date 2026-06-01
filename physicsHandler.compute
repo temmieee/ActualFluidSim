@@ -1,13 +1,13 @@
 #version 460 core
 
 const float PI=3.14159265359;
-const float targetDensity=5;
-const float pressureMultiplier=10;
+const float targetDensity=10;
+const float pressureMultiplier=20;
 const float collisionDamping=0.7;
 const float deltaTime=1.f/240.f;
 const float viscousityMultiplier=0.05f;
 const float foresight=1.f/60.f;
-const float nearPressureMultiplier=500.0f;
+const float nearPressureMultiplier=750.0f;
 struct SphereIndex{
     uint sphereIndex;
     uint hash;
