@@ -1,10 +1,10 @@
 #version 460 core
 
 const float PI=3.14159265359;
-const float targetDensity=20;
+const float targetDensity=5;
 const float pressureMultiplier=10;
 const float collisionDamping=0.7;
-const float deltaTime=1.f/180.f;
+const float deltaTime=1.f/240.f;
 const float viscousityMultiplier=0.05f;
 const float foresight=1.f/60.f;
 const float nearPressureMultiplier=500.0f;
@@ -87,7 +87,6 @@ ivec3 GetCell3D(uint objectIndex)
 // Hash cell coordinate to a single unsigned integer
 uint HashCell3D(ivec3 cell)
 {
-    cell = ivec3(uvec3(cell));
     return (cell.x * hashK1) + (cell.y * hashK2) + (cell.z * hashK3);
 }
 

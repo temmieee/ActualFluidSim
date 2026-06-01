@@ -144,6 +144,7 @@
     <Text Include="computeShader.compute">
       <FileType>Document</FileType>
     </Text>
+    <Text Include="DensitySampler.compute" />
     <Text Include="physicsHandler.compute">
       <FileType>Document</FileType>
     </Text>

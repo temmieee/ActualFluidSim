@@ -1,0 +1,161 @@
+#version 460 core
+const float PI = 3.14159265359;
+
+const vec3 scatteringCoefficients = vec3(2, 1, 01);
+const vec3 sunDirection = normalize(vec3(1, 1, 0));
+const float lightMarchStepSize = 2;
+const float maxLightTestDist = 20;
+
+struct SphereIndex
+{
+	uint sphereIndex;
+	uint hash;
+	uint cellKey;
+	uint debug;
+};
+struct Sphere
+{
+	vec3 position;
+	float radius;
+	vec4 color;
+	vec3 velocity;
+	float density;
+	vec3 predictedPosition;
+	float nearDensity;
+};
+
+
+layout (std430, binding = 1) buffer spheresBuffer
+{
+	Sphere objectData[];
+};
+layout(std430, binding = 2) buffer SphereIndexBuffer
+{
+	SphereIndex indexData[];
+};
+layout(std430, binding = 3) buffer SpatialIndexBuffer
+{
+	unsigned int spatialIndexData[];
+};
+layout(std430, binding = 4) buffer DensityBuffer
+{
+	float densities[];
+};
+layout (local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+uniform uint objectAmount;
+uniform vec3 bounds;
+uniform vec3 boundsPosition;
+uniform uvec3 resolution;
+
+//spatial hashing
+const ivec3 offsets3D[] =
+{
+	ivec3(-1, -1, -1),
+	ivec3(-1, -1, 0),
+	ivec3(-1, -1, 1),
+	ivec3(-1, 0, -1),
+	ivec3(-1, 0, 0),
+	ivec3(-1, 0, 1),
+	ivec3(-1, 1, -1),
+	ivec3(-1, 1, 0),
+	ivec3(-1, 1, 1),
+	ivec3(0, -1, -1),
+	ivec3(0, -1, 0),
+	ivec3(0, -1, 1),
+	ivec3(0, 0, -1),
+	ivec3(0, 0, 0),
+	ivec3(0, 0, 1),
+	ivec3(0, 1, -1),
+	ivec3(0, 1, 0),
+	ivec3(0, 1, 1),
+	ivec3(1, -1, -1),
+	ivec3(1, -1, 0),
+	ivec3(1, -1, 1),
+	ivec3(1, 0, -1),
+	ivec3(1, 0, 0),
+	ivec3(1, 0, 1),
+	ivec3(1, 1, -1),
+	ivec3(1, 1, 0),
+	ivec3(1, 1, 1)
+};
+
+
+// Constants used for hashing
+const uint hashK1 = 15823;
+const uint hashK2 = 9737333;
+const uint hashK3 = 440817757;
+
+// Convert floating point position into an integer cell coordinate
+ivec3 GetCell3D(uint objectIndex)
+{
+	return ivec3(floor(objectData[objectIndex].predictedPosition / objectData[objectIndex].radius));
+}
+ivec3 GetCell3DPosition(vec3 position)
+{
+	return ivec3(floor(position / objectData[0].radius));
+}
+// Hash cell coordinate to a single unsigned integer
+uint HashCell3D(ivec3 cell)
+{
+	return (cell.x * hashK1) + (cell.y * hashK2) + (cell.z * hashK3);
+}
+
+uint KeyFromHash(uint hash)
+{
+	return hash % objectAmount;
+}
+
+float DensityKernel(float radius, float dst)
+{
+	
+	
+		float scale = 15 / (2 * PI * pow(radius, 5));
+        //float scale=0.5;
+		float v = radius-0.1 - dst;
+		if (v < 0) return 0;
+		return v * 0.1;
+}
+float SampleDensityAtPosition(vec3 position)
+{
+	float density = 0.0;
+
+	ivec3 currCell = GetCell3DPosition(position);
+    //objectData[objectIndex].color.xyz=vec3(currCell)/3;
+	for (uint cellOffsetIndex = 0; cellOffsetIndex < 27; cellOffsetIndex++)
+	{
+		uint hash = HashCell3D(currCell + offsets3D[cellOffsetIndex]);
+		uint key = KeyFromHash(hash);
+		uint spatialIndex = spatialIndexData[key];
+		while (spatialIndex < objectAmount)
+		{
+            
+			SphereIndex currIndexData = indexData[spatialIndex];
+			spatialIndex++;
+			if (currIndexData.cellKey != key)
+				break;
+			if (currIndexData.hash != hash)
+				continue;
+			uint neighborIndex = currIndexData.sphereIndex;
+			float dst = max(length(objectData[neighborIndex].position - position), 0.1);
+			if (dst > objectData[neighborIndex].radius)
+				continue;
+			density += DensityKernel(objectData[neighborIndex].radius, dst);
+			if (density > 1) break;
+		}
+    
+	}
+	return density;
+}
+
+void main()
+{
+	ivec3 coordinate = ivec3(gl_GlobalInvocationID.xyz);
+	vec3 interval = 2*bounds / resolution;
+	vec3 root = boundsPosition - bounds;
+	vec3 samplePosition = interval / 2 + vec3(interval.x * coordinate.x, interval.y * coordinate.y, interval.z * coordinate.z) + root;
+	float density = SampleDensityAtPosition(samplePosition);
+	uint index = coordinate.x + coordinate.y * resolution.x + coordinate.z * resolution.x * resolution.y;
+	densities[index] = density;
+
+}
