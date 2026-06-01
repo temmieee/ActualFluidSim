@@ -12,7 +12,7 @@
 #include <algorithm>
 
 
-const unsigned int SCREEN_WIDTH = 2048;
+const unsigned int SCREEN_WIDTH = 1024;
 const unsigned int SCREEN_HEIGHT = 1024;
 
 const unsigned short OPENGL_MAJOR_VERSION = 4;
@@ -242,20 +242,19 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 	return res;
 }
 
-static std::vector<Sphere> CreateSphereArray(float center[], float bound[], int amount) {
-	std::vector<Sphere> spheres;
+void CreateSphereArray(static std::vector<Sphere>& spheres, float center[], float bound[], int amount) {
 	spheres.reserve(amount);
 
 	for (int i = 0; i < amount; i++) {
 		float positionX = center[0] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[0];
 		float positionY = center[1] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[1];
 		float positionZ = center[2] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[2];
-		float radius = 1.0f;
+		float radius = 1.6f;
 
 		float colorR = static_cast<float>(rand()) / RAND_MAX;
 		float colorG = static_cast<float>(rand()) / RAND_MAX;
 		float colorB = static_cast<float>(rand()) / RAND_MAX;
-		float colorA = 1.f;
+		float colorA = 1.0f;
 
 		Sphere newSphere(new float[] {
 			positionX, positionY, positionZ, radius,
@@ -264,7 +263,7 @@ static std::vector<Sphere> CreateSphereArray(float center[], float bound[], int 
 			});
 		spheres.push_back(newSphere);
 	}
-	return spheres;
+	return;
 }
 
 unsigned int BitAmount(unsigned int input) {
@@ -354,22 +353,25 @@ int main() {
 	glfwSwapInterval(vSync);
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
-	float bounds[3] = { 30.f, 20.f, 10.f };
-	float center[3] = { 0.f, 30.f, 0.f };
-	int amount =100000;
-	std::vector<Sphere> spheres = CreateSphereArray(center, bounds, amount);
+	float bounds[3] = { 15.f, 15.f, 10.f };
+	float center1[3] = { -45.f, 50.f, 0.f };
+	float center2[3] = { 45.f, 50.f, 0.f };
+	int amount =25000;
+	std::vector<Sphere> spheres;
+	CreateSphereArray(spheres,center1, bounds, amount);
+	CreateSphereArray(spheres, center2, bounds, amount);
 	std::vector<SphereIndex> spheresIndices;
 	std::vector<unsigned int> spatialIndices;
 	//create simulation bounds
-	float simulationBounds[3] = { 40.f, 30.f, 12.5f };
+	float simulationBounds[3] = { 55.f, 40.f, 15.f };
 	float simulationBoundsPosition[3] = { 0, simulationBounds[1], 0 };
 	RenderResources res = InitRenderResources(spheres, spheresIndices,spatialIndices);
 
 	FrameTimer timer;
 	timer.Start();
 
-	const double targetDeltaPhysics = 1.0 / 144.0;
-	const double targetDeltaRender = 1 / 60;
+	const double targetDeltaPhysics = 1.0 / 300;
+	const double targetDeltaRender = 1.0 / 60.0;
 	double physicsTracker = 0;
 	double renderTracker = 0;
 	while (!glfwWindowShouldClose(window)) {
@@ -383,19 +385,15 @@ int main() {
 		if (renderTracker > targetDeltaRender) {
 			RenderFrame(res, spheres, simulationBounds, simulationBoundsPosition);
 			renderTracker = 0;
+			glfwSwapBuffers(window);
+			glfwPollEvents();
 		}
-		glfwSwapBuffers(window);
-		glfwPollEvents();
-
-		//const time
+		
 		double frameEnd = timer.GetDelta();
 		double elapsed = frameEnd;
 
 		physicsTracker += elapsed;
 		renderTracker += elapsed;
-		float frametime = timer.GetDelta() * 1000.0f;
-		float fps = timer.GetFPS();
-		std::cout << "FPS: " << fps << "Frame Time:"<<frametime<<"\n";
 		}
 
 	CleanupRenderResources(res);

@@ -1,13 +1,13 @@
 #version 460 core
 
 const float PI=3.14159265359;
-const float targetDensity=2;
-const float pressureMultiplier=5;
-const float collisionDamping=0.9;
-const float deltaTime=1.f/120.f;
+const float targetDensity=20;
+const float pressureMultiplier=10;
+const float collisionDamping=0.7;
+const float deltaTime=1.f/180.f;
 const float viscousityMultiplier=0.05f;
 const float foresight=1.f/60.f;
-const float nearPressureMultiplier=2.0f;
+const float nearPressureMultiplier=500.0f;
 struct SphereIndex{
     uint sphereIndex;
     uint hash;
@@ -205,9 +205,9 @@ float ConvertDensityToPressure(float d){
     float densityDiff=d-targetDensity;
     return densityDiff*pressureMultiplier;
 }
-float ConverNearDensityToPressure(float nearDensity)
+float ConverNearDensityToPressure(float d)
 {
-	return nearDensity * nearPressureMultiplier;
+	return d * nearPressureMultiplier;
 }
 
 vec3 CalculatePressureForce(uint objectIndex){
@@ -277,7 +277,7 @@ vec3 CalculateViscousityForce(uint objectIndex){
     return viscousityForce;
 }
 void Collision(uint objectIndex){
-    vec3 relativePos=objectData[objectIndex].position-boundsPosition;
+    vec3 relativePos=objectData[objectIndex].predictedPosition-boundsPosition;
     if (abs(relativePos.x)+objectData[objectIndex].radius > bounds.x) {
         objectData[objectIndex].position.x = sign(relativePos.x) * (bounds.x-objectData[objectIndex].radius)+boundsPosition.x;
         objectData[objectIndex].velocity.x *= -collisionDamping;
@@ -312,8 +312,8 @@ void UpdateSpatialHash(uint objectIndex){
     }
 void main() {
 
-    //memoryBarrierBuffer();
-    //barrier();
+    memoryBarrierBuffer();
+    barrier();
     uint i = gl_GlobalInvocationID.x;
     //i=objectAmount-i-1;
 
@@ -334,10 +334,9 @@ void main() {
     
     //acceleration
     vec3 acceleration = (viscousityForce + pressureForce) / currDensity;
-    //acceleration = normalize(acceleration)*min(length(acceleration),99999);
 
     objectData[i].velocity+=acceleration*deltaTime;
-    
+    objectData[i].velocity=min(objectData[i].velocity,99);
     //changing position
     objectData[i].position += objectData[i].velocity * deltaTime;
     
@@ -359,6 +358,6 @@ void main() {
     objectData[i].color.xyz = mix(vec3(0, 0.5, 1), vec3(1, 0.5, 0), weight);
     objectData[i].color.xyz = mix(objectData[i].color.xyz, vec3(1, 0.0, 0), weight);
     //objectData[i].color.xyz=(1-1/log(objectData[i].debug)).xxx;
-    //memoryBarrierBuffer();
-    //barrier();
+    memoryBarrierBuffer();
+    barrier();
 }

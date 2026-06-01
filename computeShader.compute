@@ -1,5 +1,10 @@
 #version 460 core
 const float PI=3.14159265359;
+
+const vec3 scatteringCoefficients=vec3(4,02,01);
+const vec3 sunDirection=normalize(vec3(1,1,0));
+const float lightMarchStepSize=2;
+const float maxLightTestDist=20;
 struct Ray {
     vec3 origin;
     vec3 direction;
@@ -32,6 +37,7 @@ struct RaymarchHitInfo{
     vec3 normal;
     bool hit;
     float depth;
+    vec3 color;
 };
 layout (std430, binding = 1) buffer spheresBuffer {
     Sphere objectData[];
@@ -59,24 +65,25 @@ const ivec3 offsets3D[] =
 	ivec3(-1, 0, -1),
 	ivec3(-1, 0, 0),
 	ivec3(-1, 0, 1),
-	ivec3(-1, 1, -1),
-	ivec3(-1, 1, 0),
-	ivec3(-1, 1, 1),
 	ivec3(0, -1, -1),
-	ivec3(0, -1, 0),
 	ivec3(0, -1, 1),
 	ivec3(0, 0, -1),
-	ivec3(0, 0, 0),
 	ivec3(0, 0, 1),
-	ivec3(0, 1, -1),
-	ivec3(0, 1, 0),
-	ivec3(0, 1, 1),
 	ivec3(1, -1, -1),
 	ivec3(1, -1, 0),
 	ivec3(1, -1, 1),
 	ivec3(1, 0, -1),
 	ivec3(1, 0, 0),
 	ivec3(1, 0, 1),
+	ivec3(0, -1, 0),
+	ivec3(0, 0, 0),
+	ivec3(0, 1, 0),
+	ivec3(-1, 1, -1),
+	ivec3(-1, 1, 0),
+	ivec3(-1, 1, 1),
+	ivec3(0, 1, -1),
+	ivec3(0, 1, 0),
+	ivec3(0, 1, 1),
 	ivec3(1, 1, -1),
 	ivec3(1, 1, 0),
 	ivec3(1, 1, 1)
@@ -183,16 +190,46 @@ HitInfo GetHitInfoFromRay(Ray ray) {
 }
 
 
-float SmoothingKernel(float radius, float dst) {
-  	if (dst < radius)
+float DensityKernel(float radius, float dst){
+	if (dst < radius)
 	{
-		float scale = 315 / (64 * PI * pow(abs(radius), 9));
-		float v = radius * radius - dst * dst;
-		return v * v * v * scale;
+		//float scale = 15 / (2 * PI * pow(radius, 5));
+        float scale=0.5;
+		float v = radius - dst;
+		return  v * scale;
 	}
 	return 0;
-}
+ }
+ float SampleDensityAtPositionLight(vec3 position){
+    float density=0.0;
+    //for(uint i=0;i<objectAmount;++i){
+     //   float dst=max(length(objectData[objectIndex].predictedPosition-objectData[i].predictedPosition),0.1);
+        //density+=SmoothingKernel(objectData[i].radius,dst)*0.01f;
+    //}
 
+    ivec3 currCell=GetCell3DPosition(position);    
+    //objectData[objectIndex].color.xyz=vec3(currCell)/3;
+    for (uint cellOffsetIndex=0;cellOffsetIndex<27;cellOffsetIndex++){
+        uint hash=HashCell3D(currCell+offsets3D[cellOffsetIndex]);
+        uint key=KeyFromHash(hash);
+        uint spatialIndex=spatialIndexData[key];
+        while (spatialIndex<objectAmount)
+        {
+            
+            SphereIndex currIndexData=indexData[spatialIndex];
+            spatialIndex++;
+            if (currIndexData.cellKey!=key) break;
+            if (currIndexData.hash!=hash) continue;
+            uint neighborIndex=currIndexData.sphereIndex;
+            float dst=max(length(objectData[neighborIndex].position-position),0.1);
+            if (dst>objectData[neighborIndex].radius) continue;
+            density+=DensityKernel(objectData[neighborIndex].radius,dst);
+            //if (density>3.0) break;
+        }
+    
+    }
+    return density;
+}
 float SampleDensityAtPosition(vec3 position){
     float density=0.0;
     //for(uint i=0;i<objectAmount;++i){
@@ -215,27 +252,59 @@ float SampleDensityAtPosition(vec3 position){
             if (currIndexData.hash!=hash) continue;
             uint neighborIndex=currIndexData.sphereIndex;
             float dst=max(length(objectData[neighborIndex].position-position),0.1);
-            density+=SmoothingKernel(objectData[neighborIndex].radius,dst);
-            //if (density>0.1) break;
+            if (dst>objectData[neighborIndex].radius) continue;
+            density+=DensityKernel(objectData[neighborIndex].radius,dst);
+            //if (density>3.0) break;
         }
     
     }
     return density;
+}
+float DensityAlongRay(Ray ray, float step){
+    float totalDensity=0;
+    float tNear=0.001;
+    float tFar=maxLightTestDist;
+    while (tNear<tFar){
+        float density=SampleDensityAtPositionLight(ray.origin+ray.direction*tNear)*step;
+        if (density<0.2) break;
+        totalDensity+=density;
+        if (totalDensity>5) break;
+        if (density>0.2) step+=2.0;
+        tNear+=step;
+    }
+    return totalDensity;
 }
 RaymarchHitInfo GetRaymarchHitInfoFromRay(Ray ray){
     RaymarchHitInfo raymarchHitInfo;
     raymarchHitInfo.hit=false;
     raymarchHitInfo.position=vec3(0,0,0);
     raymarchHitInfo.depth=0;
-    float tNear=0;
+    raymarchHitInfo.color=vec3(0,0,0);
+    float tNear=0.;
     float tFar=0;
     float boxDist=BoundsTest(ray,tNear,tFar);
     if (boxDist<1) return raymarchHitInfo;
     raymarchHitInfo.hit=true;
+    tNear+=0.0001;
     //raymarchHitInfo.position=ray.origin+ray.direction*tNear;
+    float step=0.75;
     while (tNear<tFar){
-        raymarchHitInfo.depth+=SampleDensityAtPosition(ray.origin+ray.direction*tNear);
-        tNear+=5;
+        vec3 samplePos=ray.origin+ray.direction*tNear;
+        float density=SampleDensityAtPosition(samplePos)*step;
+        raymarchHitInfo.depth+=density;
+        if (density>0.1) step+=0.5;
+        Ray sunRay;
+        sunRay.origin=samplePos;
+        sunRay.direction=sunDirection;
+        //sunRay.inverseDir=1/sunDirection;
+        float densityTowardLight=DensityAlongRay(sunRay,lightMarchStepSize);
+        vec3 transmittedSunLight=exp(-densityTowardLight*scatteringCoefficients);
+        //transmittedSunLight=vec3(1,1,1);
+        vec3 inScatteredLight=transmittedSunLight*density*scatteringCoefficients;
+        vec3 viewRayTransmittance=exp(-raymarchHitInfo.depth*scatteringCoefficients);
+        tNear+=step;
+        raymarchHitInfo.color+=inScatteredLight*viewRayTransmittance;
+        if (all(lessThan(viewRayTransmittance, vec3(0.01)))) break;
     }
     return raymarchHitInfo;
 }
@@ -247,7 +316,7 @@ void main() {
     float y = float(pixelCoords.y * 2 - dimensions.y) / float(dimensions.y);
     float x = float(pixelCoords.x * 2 - dimensions.x) / float(dimensions.y);
 
-    vec3 cameraPos = vec3(0, 10.0, -50);
+    vec3 cameraPos = vec3(0, 30.0, -70);
     vec3 rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
     vec3 rayDir = normalize(rayOrigin - cameraPos);
 
@@ -265,7 +334,7 @@ void main() {
             ray.direction = rayDir;
             ray.inverseDir=1/rayDir;
             RaymarchHitInfo raymarchHitInfo=GetRaymarchHitInfoFromRay(ray);
-            if (raymarchHitInfo.hit) debug=raymarchHitInfo.depth.xxx/1;
+            if (raymarchHitInfo.hit) debug=raymarchHitInfo.color;
             // accumulate color from sphere
             //tempCol *= objectData[hitInfo.sphereIndex].color.xyz;
         }
