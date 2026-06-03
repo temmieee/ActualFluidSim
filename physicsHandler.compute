@@ -193,19 +193,22 @@ void CalculateFutureSphereDensity(uint objectIndex){
             if (currIndexData.cellKey!=key) break;
             if (currIndexData.hash!=hash) continue;
             uint neighborIndex=currIndexData.sphereIndex;
-            float dst=max(length(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition),0.001);
+            vec3 dir=(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition);
+            float dst=max(length(dir),0.001);
             density+=DensityKernel(objectData[neighborIndex].radius,dst);
             nearDensity+=NearDensityKernel(objectData[neighborIndex].radius,dst);
-            float influence=DensityKernel(objectData[neighborIndex].radius,dst);
-            float divergence=dot(objectData[neighborIndex].velocity-objectData[objectIndex].velocity,objectData[neighborIndex].velocity-objectData[objectIndex].velocity)-1;
-            float vDiff=dot(objectData[neighborIndex].velocity,objectData[objectIndex].velocity);
-            velocityDiff+=influence*vDiff*divergence;
+            float influence=1-min(1,dst/objectData[neighborIndex].radius);
+            vec3 relativeVelocity=objectData[neighborIndex].velocity-objectData[objectIndex].velocity;
+            float vDiff=length(relativeVelocity);
+            float convergence=(1-dot(relativeVelocity,-dir))*0.5;
+            velocityDiff+=influence*vDiff*convergence;
         }
     
     }
     objectData[objectIndex].density=max(density,0.2);
     objectData[objectIndex].nearDensity=max(nearDensity,0.2);
-    objectData[objectIndex].color.x=velocityDiff;
+    objectData[objectIndex].color.x=velocityDiff*0.01;
+    //objectData[objectIndex].color.x-=1.1*deltaTime;
     return;
 }
 float ConvertDensityToPressure(float d){
@@ -366,9 +369,6 @@ void main() {
      //color debugging
      
     //objectData[i].color.xyz=vec3(GetCell3D(i))/5;
-    float weight = length(objectData[i].velocity)/4;
-    objectData[i].color.xyz = mix(vec3(0, 0.5, 1), vec3(1, 0.5, 0), weight);
-    objectData[i].color.xyz = mix(objectData[i].color.xyz, vec3(1, 0.0, 0), weight);
     //objectData[i].color.xyz=(1-1/log(objectData[i].debug)).xxx;
     memoryBarrierBuffer();
     barrier();
