@@ -112,11 +112,11 @@ uint KeyFromHash(uint hash)
 {
 	return hash % objectAmount;
 }
-float SmoothingKernel(float radius, float dst) {
+float FoamKernel(float radius, float dst) {
   	if (dst < radius)
 	{
-		float scale = 315 / (64 * PI * pow(abs(radius), 9));
-		float v = radius * radius - dst * dst;
+		float scale = 315 / (64 * PI * pow(abs(radius), 15));
+		float v = max(radius * radius - dst * dst-0.75,0);
 		return v * v * v * scale;
 	}
 	return 0;
@@ -155,10 +155,10 @@ vec3 SampleDensityAtPosition(vec3 position, uint rng)
 				continue;
 			uint neighborIndex = currIndexData.sphereIndex;
 			float dst = max(length(objectData[neighborIndex].position - position), 0.1);
-			if (dst > objectData[neighborIndex].radius)
-				continue;
+			if (dst > objectData[neighborIndex].radius)	continue;
 			density += DensityKernel(objectData[neighborIndex].radius, dst,rng);
-			velocityDiff += SmoothingKernel(objectData[neighborIndex].radius,dst)*objectData[neighborIndex].color.x;
+            float influence=FoamKernel(objectData[neighborIndex].radius, dst);
+			velocityDiff +=influence*objectData[neighborIndex].color.x;
 			//if (density > 1.5) break;
 		}
     

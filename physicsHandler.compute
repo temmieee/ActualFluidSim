@@ -1,13 +1,15 @@
 #version 460 core
 
 const float PI=3.14159265359;
-const float targetDensity=5;
+const float targetDensity=10;
 const float pressureMultiplier=20;
 const float collisionDamping=0.6;
 const float deltaTime=1.f/240.f;
 const float viscousityMultiplier=0.2f;
 const float foresight=1.f/60.f;
 const float nearPressureMultiplier=150.0f;
+const float foamFactor=0.1f;
+const float foamDecay=0.75;
 struct SphereIndex{
     uint sphereIndex;
     uint hash;
@@ -201,14 +203,16 @@ void CalculateFutureSphereDensity(uint objectIndex){
             vec3 relativeVelocity=objectData[neighborIndex].velocity-objectData[objectIndex].velocity;
             float vDiff=length(relativeVelocity);
             float convergence=(1-dot(relativeVelocity,-dir))*0.5;
-            velocityDiff+=influence*vDiff*convergence;
+            velocityDiff+=max(influence*vDiff*convergence,0);
         }
     
     }
     objectData[objectIndex].density=max(density,0.2);
     objectData[objectIndex].nearDensity=max(nearDensity,0.2);
-    objectData[objectIndex].color.x=velocityDiff*0.01;
-    //objectData[objectIndex].color.x-=1.1*deltaTime;
+    float kineticEnergy=pow(objectData[objectIndex].velocity.x,2);
+    float foam=kineticEnergy*velocityDiff;
+    objectData[objectIndex].color.x+=min(foam*deltaTime,999)*foamFactor;
+    objectData[objectIndex].color.x=pow(objectData[objectIndex].color.x,1-foamDecay*deltaTime);
     return;
 }
 float ConvertDensityToPressure(float d){

@@ -298,7 +298,7 @@ void CreateSphereArray(static std::vector<Sphere>& spheres, float center[], floa
 		float positionX = center[0] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[0];
 		float positionY = center[1] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[1];
 		float positionZ = center[2] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[2];
-		float radius = 1.5f;
+		float radius = 1.25f;
 
 		float colorR = 0;
 		float colorG = 0;

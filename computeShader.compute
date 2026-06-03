@@ -2,15 +2,17 @@
 const float PI=3.14159265359;
 const float kEpsilon = 0.001;
 const float epsilon=0.5;
-const float inverseLightSpeedInFluid=2.2;
+const float inverseLightSpeedInFluid=1.2;
 const float inverseLightSpeedInAir=1;
 
-const vec3 scatteringCoefficients=vec3(1,0.6,0.25);
+const vec3 scatteringCoefficients=vec3(0.2,0.1,0.1);
 const vec3 sunDirection=normalize(vec3(1,1,3));
 const float lightMarchStepSize = 0.05;
 const float raymarchStep = 0.025;
-const float densityMultiplier=10;
+const float densityMultiplier=20;
 const float tileScale=0.01;
+
+const float smallParticleThreshold=0.75;
 struct Ray {
     vec3 origin;
     vec3 direction;
@@ -235,6 +237,10 @@ float SampleDensityFromTexture(vec3 position,uint index)
     }
     if (index==1) {
     density =texture(densityTex, localCoord).y;
+    return density;
+    }
+    if (index==2) {
+    density =texture(densityTex, localCoord).x;
     return density;
     }
     return 0;
@@ -512,12 +518,22 @@ RaymarchHitInfo GetRaymarchHitInfoFromRay(Ray ray, inout uint rngState, uint ite
     raymarchHitInfo.color=light;
     return raymarchHitInfo;
 }
-vec3 RenderSurface(Ray ray){
+vec3 RenderSurface(Ray ray, uint rngState){
     Ray localRay=TransformRayToLocalSpace(ray,inverseBoundsMatrix);
     vec3 boxDist=BoundsTest(localRay);
     if (boxDist.x < 0) return vec3(0);
-    float foam=DensityAlongRay(localRay, raymarchStep,1);
-    return vec3(foam);
+    bool isInFluid=IsInFluid(localRay.origin);
+    float foam=DensityAlongRay(localRay,raymarchStep,1);
+    HitInfo nextSurface=FindNextSurface(localRay,isInFluid,rngState,1,boxDist.z);
+    if (!nextSurface.hit) {
+        return  vec3(0);
+    }
+    //localRay=InitRay(nextSurface.position,localRay.direction);
+    float depth=DensityAlongRay(localRay, raymarchStep,2);
+    float smallParticle=smallParticleThreshold-min(depth,smallParticleThreshold);
+    float totalWhite=smallParticle+foam;
+    vec3 depthColor=Transmittance(depth);
+    return vec3(depthColor);
     }
 void main() {
 
@@ -541,9 +557,9 @@ void main() {
     rayDir = normalize(rayOrigin - cameraPos);
     for (int j = 0; j < 1; j++) {
         Ray ray=InitRay(rayOrigin, rayDir);
-        RaymarchHitInfo raymarchHitInfo=GetRaymarchHitInfoFromRay(ray,rngState,3);
-        //light+=raymarchHitInfo.color;
-        vec3 surface=RenderSurface(ray);
+        RaymarchHitInfo raymarchHitInfo=GetRaymarchHitInfoFromRay(ray,rngState,2);
+        //ight+=raymarchHitInfo.color;
+        vec3 surface=RenderSurface(ray,rngState);
         light+=surface;
     }
     vec4 pixel = vec4(light, 1.0);
