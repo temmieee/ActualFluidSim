@@ -72,13 +72,13 @@
     <Text Include="physicsHandler.compute">
       <Filter>Resource Files\Shaders</Filter>
     </Text>
-    <Text Include="computeShader.compute">
+    <Text Include="renderShader.compute">
       <Filter>Resource Files\Shaders</Filter>
     </Text>
     <Text Include="GPUSort.compute">
       <Filter>Resource Files\Shaders</Filter>
     </Text>
-    <Text Include="DensitySampler.compute">
+    <Text Include="densitySampler.compute">
       <Filter>Resource Files\Shaders</Filter>
     </Text>
   </ItemGroup>

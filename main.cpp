@@ -13,8 +13,8 @@
 #include <algorithm>
 
 
-const unsigned int SCREEN_WIDTH = 1244;
-const unsigned int SCREEN_HEIGHT = 1024;
+const unsigned int SCREEN_WIDTH = 2000;
+const unsigned int SCREEN_HEIGHT = 1224;
 
 const unsigned short OPENGL_MAJOR_VERSION = 4;
 const unsigned short OPENGL_MINOR_VERSION = 6;
@@ -185,7 +185,7 @@ void CleanupRenderResources(RenderResources& res) {
 }
 
 RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vector<SphereIndex>& spatialArray, std::vector<unsigned int>& spatialIndexArray,unsigned int densityResolution[]) {
-	RenderResources res("default.vert", "default.frag", "computeShader.compute","physicsHandler.compute", "GPUSort.compute","DensitySampler.compute");
+	RenderResources res("default.vert", "default.frag", "renderShader.compute","physicsHandler.compute", "GPUSort.compute","densitySampler.compute");
 
 	glCreateVertexArrays(1, &res.VAO);
 	glCreateBuffers(1, &res.VBO);
@@ -298,7 +298,7 @@ void CreateSphereArray(static std::vector<Sphere>& spheres, float center[], floa
 		float positionX = center[0] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[0];
 		float positionY = center[1] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[1];
 		float positionZ = center[2] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[2];
-		float radius = 1.25f;
+		float radius = 2.0f;
 
 		float colorR = 0;
 		float colorG = 0;
@@ -460,8 +460,8 @@ void HandleInputs(GLFWwindow* window,
 			double dx = xpos - lastX;
 			double dy = lastY- ypos;
 
-			boundsPosition[0] += Clamp((float)dx * 0.1f, -maxTranslationSpeed, maxTranslationSpeed);
-			boundsPosition[1] += Clamp((float)dy * 0.1f, -maxTranslationSpeed, maxTranslationSpeed);
+			boundsPosition[0] += Clamp((float)dx * 0.05f, -maxTranslationSpeed, maxTranslationSpeed);
+			boundsPosition[1] += Clamp((float)dy * 0.05f, -maxTranslationSpeed, maxTranslationSpeed);
 			lastX = xpos;
 			lastY = ypos;
 		}
@@ -490,8 +490,8 @@ void HandleInputs(GLFWwindow* window,
 						world[row] += local[col] * boundsMatrix[col][row];
 					}
 				}
-				if (world[1] < 0.0f) {
-					float depth = -world[1];
+				if (world[1] < 5.0f) {
+					float depth = 5.0f -world[1];
 					if (depth > penetrationDepth) {
 						penetrationDepth = depth;
 					}
@@ -526,11 +526,11 @@ int main() {
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
 	float bounds[3] = {15.f, 15.f, 15.f };
-	float center1[3] = { -0.f, 40.f, 0.f };
+	float center1[3] = { -0.f, 30.f, 0.f };
 	float center2[3] = { 45.f, 50.f, 0.f };
-	int amount =30000;
-	float simulationBoundsScale[3] = { 30.f, 30.f, 30.f };
-	float simulationBoundsPosition[3] = { 0, simulationBoundsScale[1]+30, 0 };
+	int amount =50000;
+	float simulationBoundsScale[3] = { 35.f, 30.f, 30.f };
+	float simulationBoundsPosition[3] = { 0, simulationBoundsScale[1]+10, 0 };
 	float simulationBoundsRotation[3] = { 0, 0.3, 0 };
 	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 7,simulationBoundsScale[1] * 7,simulationBoundsScale[2] * 7 };
 	std::vector<Sphere> spheres;
@@ -543,7 +543,7 @@ int main() {
 
 	Mat4 boundsMatrix = CalculateModelMatrix(simulationBoundsPosition, simulationBoundsRotation, simulationBoundsScale);
 	Mat4 inverseBoundsMatrix = CalculateInverseModelMatrix(simulationBoundsPosition, simulationBoundsRotation, simulationBoundsScale);
-	const double targetDeltaPhysics = 1.0 / 500;
+	const double targetDeltaPhysics = 1.0 / 240;
 	const double targetDeltaRender = 1.0 / 60.0;
 	double physicsTracker = 0;
 	double renderTracker = 0;

@@ -142,10 +142,10 @@
     <ClCompile Include="VBO.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <Text Include="computeShader.compute">
+    <Text Include="renderShader.compute">
       <FileType>Document</FileType>
     </Text>
-    <Text Include="DensitySampler.compute" />
+    <Text Include="densitySampler.compute" />
     <Text Include="physicsHandler.compute">
       <FileType>Document</FileType>
     </Text>
