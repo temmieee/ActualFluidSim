@@ -42,7 +42,19 @@ uniform uint objectAmount;
 uniform vec3 bounds;
 uniform vec3 boundsPosition;
 uniform uvec3 resolution;
+uniform mat4 boundsMatrix;
+uniform mat4 inverseBoundsMatrix;
 
+float RandomValue(inout uint seed) {
+    seed *= (seed + 195439) * (seed + 124395) * (seed + 845921);
+    return seed / 4294967295.0;
+}
+
+float RandomValueNormalDistribution(inout uint seed) {
+    float theta = 2 * 3.14159265359 * RandomValue(seed);
+    float rho = sqrt(-2.0 * log(RandomValue(seed)));
+    return rho * cos(theta);
+}
 //spatial hashing
 const ivec3 offsets3D[] =
 {
@@ -101,17 +113,18 @@ uint KeyFromHash(uint hash)
 	return hash % objectAmount;
 }
 
-float DensityKernel(float radius, float dst)
+float DensityKernel(float radius, float dst, uint rng)
 {
 	
 	
 		float scale = 15 / (2 * PI * pow(radius, 5));
         //float scale=0.5;
-		float v = radius+0.1 - dst;
+		float v = radius-clamp(RandomValueNormalDistribution(rng),0.3,0.15)- dst;
 		if (v < 0) return 0;
-		return v * 0.2;
+		return v * scale;
 }
-float SampleDensityAtPosition(vec3 position)
+
+float SampleDensityAtPosition(vec3 position, uint rng)
 {
 	float density = 0.0;
 
@@ -135,7 +148,7 @@ float SampleDensityAtPosition(vec3 position)
 			float dst = max(length(objectData[neighborIndex].position - position), 0.1);
 			if (dst > objectData[neighborIndex].radius)
 				continue;
-			density += DensityKernel(objectData[neighborIndex].radius, dst);
+			density += DensityKernel(objectData[neighborIndex].radius, dst,rng);
 			if (density > 0.5) break;
 		}
     
@@ -146,10 +159,12 @@ float SampleDensityAtPosition(vec3 position)
 void main()
 {
 	ivec3 coordinate = ivec3(gl_GlobalInvocationID.xyz);
-	vec3 interval = 2*bounds / resolution;
-	vec3 root = boundsPosition - bounds;
+	vec3 interval = vec3(2) / resolution;
+	vec3 root = vec3(-1);
 	vec3 samplePosition = interval / 2 + vec3(interval.x * coordinate.x, interval.y * coordinate.y, interval.z * coordinate.z) + root;
-	float density = SampleDensityAtPosition(samplePosition);
+	samplePosition = (boundsMatrix * vec4(samplePosition, 1)).xyz;
+	uint rng=coordinate.x+coordinate.y*resolution.x+coordinate.z*resolution.x*resolution.y;
+	float density = SampleDensityAtPosition(samplePosition,rng);
 	imageStore(densityTex, coordinate, vec4(density));
 
 }

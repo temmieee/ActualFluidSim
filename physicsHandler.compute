@@ -3,9 +3,9 @@
 const float PI=3.14159265359;
 const float targetDensity=10;
 const float pressureMultiplier=20;
-const float collisionDamping=0.7;
+const float collisionDamping=0.6;
 const float deltaTime=1.f/240.f;
-const float viscousityMultiplier=0.05f;
+const float viscousityMultiplier=0.1f;
 const float foresight=1.f/60.f;
 const float nearPressureMultiplier=750.0f;
 struct SphereIndex{
@@ -40,6 +40,8 @@ uniform float gravity;
 uniform uint objectAmount;
 uniform vec3 bounds;
 uniform vec3 boundsPosition;
+uniform mat4 boundsMatrix;
+uniform mat4 inverseBoundsMatrix;
 
 //spatial hashing
 const ivec3 offsets3D[] =
@@ -275,27 +277,32 @@ vec3 CalculateViscousityForce(uint objectIndex){
     }
     return viscousityForce;
 }
-void Collision(uint objectIndex){
-    vec3 relativePos=objectData[objectIndex].predictedPosition-boundsPosition;
-    if (abs(relativePos.x)+objectData[objectIndex].radius > bounds.x) {
-        objectData[objectIndex].position.x = sign(relativePos.x) * (bounds.x-objectData[objectIndex].radius)+boundsPosition.x;
-        objectData[objectIndex].velocity.x *= -collisionDamping;
-        //objectData[objectIndex].velocity *= 0.9;
+void Collision(uint objectIndex) {
+    // Position into local space
+    vec3 localPosition = (inverseBoundsMatrix * vec4(objectData[objectIndex].position, 1)).xyz;
 
+    // Velocity into local space (no normalization yet)
+    vec3 localVelocity = (inverseBoundsMatrix * vec4(objectData[objectIndex].velocity, 0)).xyz;
+
+    // Collision response
+    if (abs(localPosition.x) > 1) {
+        localPosition.x = sign(localPosition.x);
+        localVelocity.x *= -collisionDamping;
     }
-    if (abs(relativePos.y)+objectData[objectIndex].radius > bounds.y) {
-        objectData[objectIndex].position.y = sign(relativePos.y) * (bounds.y-objectData[objectIndex].radius)+boundsPosition.y;
-        objectData[objectIndex].velocity.y *= -collisionDamping;
-        //objectData[objectIndex].velocity *= 0.9;
-        
+    if (abs(localPosition.y) > 1) {
+        localPosition.y = sign(localPosition.y);
+        localVelocity.y *= -collisionDamping;
     }
-    if (abs(relativePos.z)+objectData[objectIndex].radius > bounds.z) {
-        objectData[objectIndex].position.z = sign(relativePos.z) * (bounds.z-objectData[objectIndex].radius)+boundsPosition.z;
-        objectData[objectIndex].velocity.z *= -collisionDamping;
-        //objectData[objectIndex].velocity *= 0.9;
+    if (abs(localPosition.z) > 1) {
+        localPosition.z = sign(localPosition.z);
+        localVelocity.z *= -collisionDamping;
     }
-    
+
+    // Transform back to world space
+    objectData[objectIndex].position = (boundsMatrix * vec4(localPosition, 1)).xyz;
+    objectData[objectIndex].velocity = (boundsMatrix * vec4(localVelocity, 0)).xyz;
 }
+
 vec3 PredictPosition(uint objectIndex){
     vec3 predictedVelocity=objectData[objectIndex].velocity;
     vec3 predictedPosition=objectData[objectIndex].position+predictedVelocity*foresight;
