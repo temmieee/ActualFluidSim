@@ -216,7 +216,7 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 
 
 	glCreateTextures(GL_TEXTURE_3D, 1, &res.densityTex);
-	glTextureStorage3D(res.densityTex, 1, GL_R16F, densityResolution[0], densityResolution[1], densityResolution[2]);
+	glTextureStorage3D(res.densityTex, 1, GL_RG16F, densityResolution[0], densityResolution[1], densityResolution[2]);
 
 	glTextureParameteri(res.densityTex, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTextureParameteri(res.densityTex, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -225,7 +225,7 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 	glTextureParameteri(res.densityTex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTextureParameteri(res.densityTex, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
-	glBindImageTexture(4,res.densityTex,0,GL_TRUE,0,GL_WRITE_ONLY, GL_R16F);
+	glBindImageTexture(4,res.densityTex,0,GL_TRUE,0,GL_WRITE_ONLY, GL_RG16F);
 
 	//init buffer
 	unsigned int amount = spheresArray.size();
@@ -298,11 +298,11 @@ void CreateSphereArray(static std::vector<Sphere>& spheres, float center[], floa
 		float positionX = center[0] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[0];
 		float positionY = center[1] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[1];
 		float positionZ = center[2] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[2];
-		float radius = 1.25f;
+		float radius = 1.5f;
 
-		float colorR = static_cast<float>(rand()) / RAND_MAX;
-		float colorG = static_cast<float>(rand()) / RAND_MAX;
-		float colorB = static_cast<float>(rand()) / RAND_MAX;
+		float colorR = 1;
+		float colorG = 0;
+		float colorB = 0;
 		float colorA = 1.0f;
 
 		Sphere newSphere(new float[] {
@@ -473,11 +473,38 @@ void HandleInputs(GLFWwindow* window,
 		boundsPosition[1] -= downwardSpeed * deltaTime; // Apply constant downward movement
 	}
 	// collision
-	
-	float up[3] = { 0.0f, 1.0f, 0.0f };
-	float dotUp = boundsPosition[0] * up[0] + boundsPosition[1] * up[1] + boundsPosition[2] * up[2];
-	if (dotUp < boundsScale[1]) downwardSpeed = 0;
-	boundsPosition[1] = Clamp(dotUp, boundsScale[1], 100.0f);
+	float penetrationDepth = 0.0f;
+
+	for (char i = 0; i < 2; i++) {
+		for (char j = 0; j < 2; j++) {
+			for (char k = 0; k < 2; k++) {
+				float local[4] = {
+					(i ? 1: -1),
+					(j ? 1 : -1) ,
+					(k ? 1 : -1),
+					1.0f
+				};
+				float world[4] = { 0,0,0,0 };
+				for (int row = 0; row < 4; row++) {
+					for (int col = 0; col < 4; col++) {
+						world[row] += local[col] * boundsMatrix[col][row];
+					}
+				}
+				if (world[1] < 0.0f) {
+					float depth = -world[1];
+					if (depth > penetrationDepth) {
+						penetrationDepth = depth;
+					}
+				}
+			}
+		}
+	}
+
+	if (penetrationDepth > 0.0f) {
+		boundsPosition[1] += penetrationDepth;
+		downwardSpeed = 0;
+	}
+
 	boundsMatrix = CalculateModelMatrix(boundsPosition, boundsRotation, boundsScale);
 	inverseBoundsMatrix = CalculateInverseModelMatrix(boundsPosition, boundsRotation, boundsScale);
 }
@@ -498,14 +525,14 @@ int main() {
 	glfwSwapInterval(vSync);
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
-	float bounds[3] = {22.f, 22.f, 22.f };
+	float bounds[3] = {15.f, 15.f, 15.f };
 	float center1[3] = { -0.f, 40.f, 0.f };
 	float center2[3] = { 45.f, 50.f, 0.f };
 	int amount =30000;
 	float simulationBoundsScale[3] = { 30.f, 30.f, 30.f };
 	float simulationBoundsPosition[3] = { 0, simulationBoundsScale[1]+30, 0 };
 	float simulationBoundsRotation[3] = { 0, 0.3, 0 };
-	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 10,simulationBoundsScale[1] * 10,simulationBoundsScale[2] * 10 };
+	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 7,simulationBoundsScale[1] * 7,simulationBoundsScale[2] * 7 };
 	std::vector<Sphere> spheres;
 	CreateSphereArray(spheres,center1, bounds, amount);
 	//CreateSphereArray(spheres, center2, bounds, amount);

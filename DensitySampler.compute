@@ -112,22 +112,31 @@ uint KeyFromHash(uint hash)
 {
 	return hash % objectAmount;
 }
-
+float SmoothingKernel(float radius, float dst) {
+  	if (dst < radius)
+	{
+		float scale = 315 / (64 * PI * pow(abs(radius), 9));
+		float v = radius * radius - dst * dst;
+		return v * v * v * scale;
+	}
+	return 0;
+}
 float DensityKernel(float radius, float dst, uint rng)
 {
 	
 	
 		float scale = 15 / (2 * PI * pow(radius, 5));
         //float scale=0.5;
-		float v = radius-clamp(RandomValueNormalDistribution(rng),0.3,0.15)- dst;
+		float v = radius-clamp(RandomValueNormalDistribution(rng),0.35,0.1)- dst;
 		if (v < 0) return 0;
 		return v * scale;
 }
 
-float SampleDensityAtPosition(vec3 position, uint rng)
+vec3 SampleDensityAtPosition(vec3 position, uint rng)
 {
 	float density = 0.0;
-
+	float velocityDiff = 0.0;
+	float kineticEnergy=0.0;
 	ivec3 currCell = GetCell3DPosition(position);
     //objectData[objectIndex].color.xyz=vec3(currCell)/3;
 	for (uint cellOffsetIndex = 0; cellOffsetIndex < 27; cellOffsetIndex++)
@@ -149,11 +158,13 @@ float SampleDensityAtPosition(vec3 position, uint rng)
 			if (dst > objectData[neighborIndex].radius)
 				continue;
 			density += DensityKernel(objectData[neighborIndex].radius, dst,rng);
-			if (density > 0.5) break;
+			velocityDiff += SmoothingKernel(objectData[neighborIndex].radius,dst)*objectData[neighborIndex].color.x;
+			//if (density > 1.5) break;
 		}
     
 	}
-	return density;
+	vec3 result=vec3(density,velocityDiff.xx);
+	return result;
 }
 
 void main()
@@ -164,7 +175,7 @@ void main()
 	vec3 samplePosition = interval / 2 + vec3(interval.x * coordinate.x, interval.y * coordinate.y, interval.z * coordinate.z) + root;
 	samplePosition = (boundsMatrix * vec4(samplePosition, 1)).xyz;
 	uint rng=coordinate.x+coordinate.y*resolution.x+coordinate.z*resolution.x*resolution.y;
-	float density = SampleDensityAtPosition(samplePosition,rng);
-	imageStore(densityTex, coordinate, vec4(density));
+	vec3 density = SampleDensityAtPosition(samplePosition,rng);
+	imageStore(densityTex, coordinate, vec4(density.xyz,1));
 
 }

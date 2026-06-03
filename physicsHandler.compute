@@ -1,13 +1,13 @@
 #version 460 core
 
 const float PI=3.14159265359;
-const float targetDensity=10;
+const float targetDensity=5;
 const float pressureMultiplier=20;
 const float collisionDamping=0.6;
 const float deltaTime=1.f/240.f;
-const float viscousityMultiplier=0.1f;
+const float viscousityMultiplier=0.2f;
 const float foresight=1.f/60.f;
-const float nearPressureMultiplier=750.0f;
+const float nearPressureMultiplier=150.0f;
 struct SphereIndex{
     uint sphereIndex;
     uint hash;
@@ -173,6 +173,7 @@ float NearDensityDerivative(float radius, float dst){
 void CalculateFutureSphereDensity(uint objectIndex){
     float density=0.0;
     float nearDensity=0.0;
+    float velocityDiff=0.0;
     //for(uint i=0;i<objectAmount;++i){
      //   float dst=max(length(objectData[objectIndex].predictedPosition-objectData[i].predictedPosition),0.1);
         //density+=SmoothingKernel(objectData[i].radius,dst)*0.01f;
@@ -195,11 +196,16 @@ void CalculateFutureSphereDensity(uint objectIndex){
             float dst=max(length(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition),0.001);
             density+=DensityKernel(objectData[neighborIndex].radius,dst);
             nearDensity+=NearDensityKernel(objectData[neighborIndex].radius,dst);
+            float influence=DensityKernel(objectData[neighborIndex].radius,dst);
+            float divergence=dot(objectData[neighborIndex].velocity-objectData[objectIndex].velocity,objectData[neighborIndex].velocity-objectData[objectIndex].velocity)-1;
+            float vDiff=dot(objectData[neighborIndex].velocity,objectData[objectIndex].velocity);
+            velocityDiff+=influence*vDiff*divergence;
         }
     
     }
     objectData[objectIndex].density=max(density,0.2);
     objectData[objectIndex].nearDensity=max(nearDensity,0.2);
+    objectData[objectIndex].color.x=velocityDiff;
     return;
 }
 float ConvertDensityToPressure(float d){
@@ -342,7 +348,7 @@ void main() {
     vec3 acceleration = (viscousityForce + pressureForce) / currDensity;
 
     objectData[i].velocity+=acceleration*deltaTime;
-    objectData[i].velocity=min(objectData[i].velocity,99);
+    objectData[i].velocity=min(objectData[i].velocity,90);
     //changing position
     objectData[i].position += objectData[i].velocity * deltaTime;
     
