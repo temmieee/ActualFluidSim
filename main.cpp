@@ -13,8 +13,8 @@
 #include <algorithm>
 
 
-const unsigned int SCREEN_WIDTH = 2000;
-const unsigned int SCREEN_HEIGHT = 1224;
+const unsigned int SCREEN_WIDTH = 1024;
+const unsigned int SCREEN_HEIGHT = 1024;
 
 const unsigned short OPENGL_MAJOR_VERSION = 4;
 const unsigned short OPENGL_MINOR_VERSION = 6;
@@ -298,7 +298,7 @@ void CreateSphereArray(static std::vector<Sphere>& spheres, float center[], floa
 		float positionX = center[0] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[0];
 		float positionY = center[1] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[1];
 		float positionZ = center[2] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[2];
-		float radius = 1.250f;
+		float radius = 1.0f;
 
 		float colorR = 0;
 		float colorG = 0;
@@ -359,7 +359,7 @@ void Sort(RenderResources& res, unsigned int objectAmount) {
 void UpdatePhysics(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[], float boundsPosition[], Mat4& boundsMatrix, Mat4& inverseBoundsMatrix) {
 	unsigned int objectAmount = spheresArray.size();
 	res.physicsShader.Activate();
-	glUniform1f(res.physicsGravity, 20.0f);
+	glUniform1f(res.physicsGravity, 30.0f);
 	glUniform1ui(res.physicsObjectAmount, objectAmount);
 	glUniform3f(res.physicsBounds, bounds[0], bounds[1], bounds[2]);
 	glUniform3f(res.physicsBoundsPosition, boundsPosition[0], boundsPosition[1], boundsPosition[2]);
@@ -525,14 +525,14 @@ int main() {
 	glfwSwapInterval(vSync);
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
-	float bounds[3] = {15.f, 15.f, 15.f };
+	float bounds[3] = {25.f, 25.f, 25.f };
 	float center1[3] = { -0.f, 30.f, 0.f };
 	float center2[3] = { 45.f, 50.f, 0.f };
-	int amount =50000;
-	float simulationBoundsScale[3] = { 35.f, 30.f, 30.f };
+	int amount =36000;
+	float simulationBoundsScale[3] = { 30.f, 30.f, 30.f };
 	float simulationBoundsPosition[3] = { 0, simulationBoundsScale[1]+10, 0 };
 	float simulationBoundsRotation[3] = { 0, 0.3, 0 };
-	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 7,simulationBoundsScale[1] * 7,simulationBoundsScale[2] * 7 };
+	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 4,simulationBoundsScale[1] * 4,simulationBoundsScale[2] * 4};
 	std::vector<Sphere> spheres;
 	CreateSphereArray(spheres,center1, bounds, amount);
 	//CreateSphereArray(spheres, center2, bounds, amount);

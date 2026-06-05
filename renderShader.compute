@@ -1,15 +1,15 @@
 #version 460 core
 const float PI=3.14159265359;
-const float kEpsilon = 0.001;
-const float epsilon=0.2;
-const float inverseLightSpeedInFluid=1.8;
+const float kEpsilon = 0.00001;
+const float epsilon=0.01;
+const float inverseLightSpeedInFluid=1.93;
 const float inverseLightSpeedInAir=1;
 
 const vec3 scatteringCoefficients=vec3(0.3,0.2,0.1);
-const vec3 sunDirection=normalize(vec3(0,1,2));
-const float lightMarchStepSize = 0.025;
-const float raymarchStep = 0.02;
-const float densityMultiplier=20;
+const vec3 sunDirection=normalize(vec3(2,1,2));
+const float lightMarchStepSize = 0.015;
+const float raymarchStep = 0.001;
+const float densityMultiplier=2;
 const float tileScale=0.01;
 
 const float smallParticleThreshold=0.75;
@@ -205,14 +205,7 @@ vec3 FloorTest(Ray ray){
     vec3 result=vec3(dist,tNear,tFar);
 	return result;
 }
-float DensityKernel(float radius, float dst){
-	
-		float scale = 15 / (2 * PI * pow(radius, 5));
-        //float scale=0.5;
-		float v = radius+0.5 - dst;
-        if (v < 0) return 0;
-		return  v * scale;
- }
+
  
 
 
@@ -229,11 +222,11 @@ float SampleDensityFromTexture(vec3 position,uint index)
     {
         isEdge = true;
     }
-    if (isEdge)        return -.001;
+    if (isEdge)        return -.05;
    
     if (index==0) {
     density =texture(densityTex, localCoord).x;
-    return density-.1;
+    return density-.05;
     }
     if (index==1) {
     density =texture(densityTex, localCoord).y;
@@ -267,7 +260,7 @@ vec3 SampleSky(vec3 dir)
 {
     const vec3 colGround     = vec3(0.5, 0.5, 0.5);
     const vec3 colSkyHorizon = vec3(1.0, 1.0, 1.0);
-    const vec3 colSkyZenith  = vec3(0.08, 0.37, 0.73);
+    const vec3 colSkyZenith  = vec3(0.05, 0.3, 0.75);
 
     // Sun highlight
     float sun = pow(max(0.0, dot(dir, sunDirection)), 500.0);
@@ -364,7 +357,7 @@ vec3 CalculateClosestFaceNormal(vec3 position)
     }
 }
 vec3 CalculateNormal(vec3 position){
-    const float s = 0.01;
+    const float s = 0.05;
     vec3 offsetX = vec3(1.0, 0.0, 0.0) * s;
     vec3 offsetY = vec3(0.0, 1.0, 0.0) * s;
     vec3 offsetZ = vec3(0.0, 0.0, 1.0) * s;
@@ -376,8 +369,8 @@ vec3 CalculateNormal(vec3 position){
     vec3 o = 1 - abs(position);
     float faceWeight = min(o.x, min(o.y, o.z));
     vec3 faceNormal = CalculateClosestFaceNormal(position);
-     const float smoothDst = 2.7;
-    const float smoothPow = 7.0;
+     const float smoothDst = 0.001;
+    const float smoothPow = 20.50;
 
     faceWeight = (1.0 - smoothstep(0.0, smoothDst, faceWeight)) *
                  (1.0 - pow(clamp(volumeNormal.y, 0.0, 1.0), smoothPow));
@@ -387,7 +380,7 @@ vec3 CalculateNormal(vec3 position){
  float CalculateReflectance(vec3 inDir, vec3 normal, float indexofRefractionSource, float indexofRefractionDestination)
 {
     float ratio = indexofRefractionSource / indexofRefractionDestination;
-    float cosAngleIn = clamp(-dot(inDir, normal),1,0);
+    float cosAngleIn = -dot(inDir, normal);
     float sinSqrAngleOfRefraction = ratio * ratio * (1 - cosAngleIn * cosAngleIn);
     if (sinSqrAngleOfRefraction >= 1) return 1;
     float cosAngleOfRefraction = sqrt(1 - sinSqrAngleOfRefraction);
@@ -418,11 +411,11 @@ HitInfo FindNextSurface(Ray ray, bool findNextEntryPoint, uint rngState, float r
     info.density = 0;
     info.position = vec3(0);
     info.normal = vec3(0);
-    if (dot(ray.direction, ray.direction) < 0.5) return info;
+    if (dot(ray.direction, ray.direction) < 0.9) return info;
 
     vec3 boundsDstInfo = BoundsTest(ray);
     if (boundsDstInfo.x < 0) return info;
-    float r = (RandomValue(rngState) - 0.5) * raymarchStep* 0.5;
+    float r = (RandomValue(rngState) - 0.5) * raymarchStep* 0.4;
     bool hasExittedFluid = !IsInFluid(ray.origin);
     ray.origin = ray.origin + ray.direction * (boundsDstInfo.x + r);
 
@@ -492,25 +485,23 @@ RaymarchHitInfo GetRaymarchHitInfoFromRay(Ray ray, inout uint rngState, uint ite
         LightBehaviour lightBehaviour=CalculateReflectionAndRefraction(localRay.direction,normal,indexofRefractionSource,indexofRefractionDestination);
         Ray refractRay=InitRay(nextSurface.position,lightBehaviour.refractDir);
         Ray reflectRay=InitRay(nextSurface.position,lightBehaviour.reflectDir);
-        float densityAlongRefractRay=DensityAlongRay(refractRay,densityStepSide,0);
-        float densityAlongReflectRay=DensityAlongRay(reflectRay,densityStepSide,0);
-        bool isRefracted=densityAlongRefractRay * lightBehaviour.refractWeight > densityAlongReflectRay * lightBehaviour.reflectWeight;
+        float densityAlongRefractRay=DensityAlongRay(refractRay,raymarchStep,0);
+        float densityAlongReflectRay = DensityAlongRay(reflectRay, raymarchStep, 0);
+        bool isRefracted=lightBehaviour.refractWeight > lightBehaviour.reflectWeight;
         isInFluid=isRefracted!=isInFluid;
-        //float rnd = RandomValue(rngState);
-        //isRefracted = rnd > lightBehaviour.reflectWeight;
         if (!isRefracted){
-            light += SampleEnvironment(refractRay)*transmittance*Transmittance(densityAlongRefractRay)*pow(lightBehaviour.refractWeight,1);
+        //  light += SampleEnvironment(refractRay)*transmittance*Transmittance(densityAlongRefractRay)*pow(lightBehaviour.refractWeight,1);
             //light+=vec3(0,0,1)*0.1;
         }
         else{
-            light += SampleEnvironment(reflectRay)*transmittance*Transmittance(densityAlongReflectRay)*pow(lightBehaviour.reflectWeight,1);
+        //   light += SampleEnvironment(reflectRay)*transmittance*Transmittance(densityAlongReflectRay)*pow(lightBehaviour.reflectWeight,1);
             //light+=vec3(0,1,0)*0.1;
         }
-        transmittance = max(transmittance, vec3(0.001));
+        //transmittance = max(transmittance, vec3(0.001));
         if (isRefracted) localRay.direction=lightBehaviour.refractDir;
         else localRay.direction=lightBehaviour.reflectDir;
         localRay=InitRay(nextSurface.position,localRay.direction);
-        raymarchHitInfo.position=SampleEnvironment(reflectRay)*transmittance*Transmittance(densityAlongReflectRay);
+        raymarchHitInfo.position=normal;
     }
     //if (!raymarchHitInfo.hit) return raymarchHitInfo;
     float densityRemainder = DensityAlongRay(localRay, lightMarchStepSize,2);
@@ -526,7 +517,7 @@ vec3 RenderSurface(Ray ray, uint rngState){
     float foam=DensityAlongRay(localRay,raymarchStep,1);
     HitInfo nextSurface=FindNextSurface(localRay,isInFluid,rngState,1,boxDist.z);
     if (!nextSurface.hit) return  SampleEnvironment(localRay);
-    float depth=DensityAlongRay(localRay, raymarchStep,2);
+    float depth=DensityAlongRay(localRay, raymarchStep,0);
     float smallParticle=smallParticleThreshold-min(depth,smallParticleThreshold);
     float totalWhite=smallParticle*0.+foam;
     vec3 transmittence=Transmittance(depth);
@@ -540,7 +531,7 @@ vec3 RenderSurface(Ray ray, uint rngState){
     Ray reflectRay=InitRay(nextSurface.position,lightBehaviour.reflectDir);
     vec3 reflection=SampleEnvironment(reflectRay)*lightBehaviour.reflectWeight;
     vec3 refraction=SampleEnvironment(refractRay)*lightBehaviour.refractWeight*transmittence;
-    vec3 totalSurfaceLight=vec3(totalWhite);
+    vec3 totalSurfaceLight = vec3(totalWhite) + reflection + refraction;
     return totalSurfaceLight;
     }
 void main() {
@@ -563,15 +554,16 @@ void main() {
 
     rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
     rayDir = normalize(rayOrigin - cameraPos);
-    for (int j = 0; j < 1; j++) {
+    for (int j = 0; j < repetition; j++) {
         Ray ray=InitRay(rayOrigin, rayDir);
-        RaymarchHitInfo raymarchHitInfo=GetRaymarchHitInfoFromRay(ray,rngState,1);
+        RaymarchHitInfo raymarchHitInfo=GetRaymarchHitInfoFromRay(ray,rngState,3);
         vec3 raymarchLight=raymarchHitInfo.color;
         vec3 surface=RenderSurface(ray,rngState);
         //light+=mix(raymarchLight,surface,surface);
-        light+=mix(surface,raymarchLight,0.0);
+        light+=mix(surface,raymarchLight,1);
         //light+=raymarchLight;
     }
+    light = light / repetition;
     vec4 pixel = vec4(light, 1.0);
     imageStore(screen, pixelCoords, pixel);
 }

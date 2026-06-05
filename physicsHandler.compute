@@ -1,15 +1,17 @@
 #version 460 core
 
 const float PI=3.14159265359;
-const float targetDensity=2;
-const float pressureMultiplier=10;
+const float targetDensity=5;
+const float pressureMultiplier=5;
 const float collisionDamping=0.5;
+const float boundsElectroMagneticRepulsion = 10.5;
+const float boundsRepulsionRadius=0.01;
 const float deltaTime=1.f/120f;
 const float viscousityMultiplier=0.005f;
 const float foresight=1.f/120;
-const float nearPressureMultiplier=500.0f;
+const float nearPressureMultiplier=550.0f;
 const float foamFactor=0.001f;
-const float foamDecay=121.0;
+const float foamDecay=120.5;
 struct SphereIndex{
     uint sphereIndex;
     uint hash;
@@ -290,16 +292,15 @@ vec3 CalculateViscousityForce(uint objectIndex){
     return viscousityForce;
 }
 void Collision(uint objectIndex) {
-    // Position into local space
     vec3 localPosition = (inverseBoundsMatrix * vec4(objectData[objectIndex].position, 1)).xyz;
-
-    // Velocity into local space (no normalization yet)
+    
     vec3 localVelocity = (inverseBoundsMatrix * vec4(objectData[objectIndex].velocity, 0)).xyz;
 
     // Collision response
     if (abs(localPosition.x) > 1) {
         localPosition.x = sign(localPosition.x);
         localVelocity.x *= -collisionDamping;
+
     }
     if (abs(localPosition.y) > 1) {
         localPosition.y = sign(localPosition.y);
@@ -309,7 +310,22 @@ void Collision(uint objectIndex) {
         localPosition.z = sign(localPosition.z);
         localVelocity.z *= -collisionDamping;
     }
+    
+    // Collision response
+    if (abs(localPosition.x) > 1-boundsRepulsionRadius)
+    {
+        localVelocity.x -= sign(localPosition.x) * boundsElectroMagneticRepulsion * deltaTime;
 
+    }
+    if (abs(localPosition.y) > 1 - boundsRepulsionRadius)
+    {
+        localVelocity.y -= sign(localPosition.y) * boundsElectroMagneticRepulsion * deltaTime;
+    }
+    if (abs(localPosition.z) > 1 - boundsRepulsionRadius)
+    {
+        localVelocity.z -= sign(localPosition.z) * boundsElectroMagneticRepulsion * deltaTime;
+    }
+    
     // Transform back to world space
     objectData[objectIndex].position = (boundsMatrix * vec4(localPosition, 1)).xyz;
     objectData[objectIndex].velocity = (boundsMatrix * vec4(localVelocity, 0)).xyz;
@@ -329,11 +345,11 @@ void UpdateSpatialHash(uint objectIndex){
     indexData[objectIndex].cellKey=key;
 }
 void Gravity(uint objectIndex){
-if (objectData[objectIndex].color.x<0.2){
+if (objectData[objectIndex].color.x<0.1){
     objectData[objectIndex].velocity.y -= gravity*deltaTime;
     }
     else{
-        objectData[objectIndex].velocity.y -= gravity*deltaTime*0.1;
+        objectData[objectIndex].velocity.y -= gravity*deltaTime*0.9;
     }
 }
 void main() {
