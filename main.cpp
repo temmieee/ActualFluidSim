@@ -298,7 +298,7 @@ void CreateSphereArray(static std::vector<Sphere>& spheres, float center[], floa
 		float positionX = center[0] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[0];
 		float positionY = center[1] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[1];
 		float positionZ = center[2] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[2];
-		float radius = 2.0f;
+		float radius = 1.250f;
 
 		float colorR = 0;
 		float colorG = 0;
@@ -490,8 +490,8 @@ void HandleInputs(GLFWwindow* window,
 						world[row] += local[col] * boundsMatrix[col][row];
 					}
 				}
-				if (world[1] < 5.0f) {
-					float depth = 5.0f -world[1];
+				if (world[1] < 2.0f) {
+					float depth = 2.0f -world[1];
 					if (depth > penetrationDepth) {
 						penetrationDepth = depth;
 					}

@@ -116,7 +116,7 @@ float FoamKernel(float radius, float dst) {
   	if (dst < radius)
 	{
 		float scale = 315 / (64 * PI * pow(abs(radius), 15));
-		float v = max(radius * radius - dst * dst-0.225,0);
+		float v = max(radius * radius - dst * dst-0.,0);
 		return v * v * v * scale;
 	}
 	return 0;

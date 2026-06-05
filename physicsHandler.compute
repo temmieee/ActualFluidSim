@@ -8,8 +8,8 @@ const float deltaTime=1.f/120f;
 const float viscousityMultiplier=0.005f;
 const float foresight=1.f/120;
 const float nearPressureMultiplier=500.0f;
-const float foamFactor=0.005f;
-const float foamDecay=0.75;
+const float foamFactor=0.001f;
+const float foamDecay=121.0;
 struct SphereIndex{
     uint sphereIndex;
     uint hash;
@@ -175,7 +175,6 @@ float NearDensityDerivative(float radius, float dst){
 void CalculateFutureSphereDensity(uint objectIndex){
     float density=0.0;
     float nearDensity=0.0;
-    float velocityDiff=0.0;
     //for(uint i=0;i<objectAmount;++i){
      //   float dst=max(length(objectData[objectIndex].predictedPosition-objectData[i].predictedPosition),0.1);
         //density+=SmoothingKernel(objectData[i].radius,dst)*0.01f;
@@ -199,20 +198,11 @@ void CalculateFutureSphereDensity(uint objectIndex){
             float dst=max(length(dir),0.001);
             density+=DensityKernel(objectData[neighborIndex].radius,dst);
             nearDensity+=NearDensityKernel(objectData[neighborIndex].radius,dst);
-            float influence=1-min(1,dst/objectData[neighborIndex].radius);
-            vec3 relativeVelocity=objectData[neighborIndex].velocity-objectData[objectIndex].velocity;
-            float vDiff=length(relativeVelocity);
-            float convergence=(1-dot(normalize(relativeVelocity),normalize(-dir)))*0.5;
-            velocityDiff+=max(influence*vDiff*convergence,0);
         }
     
     }
     objectData[objectIndex].density=max(density,0.2);
     objectData[objectIndex].nearDensity=max(nearDensity,0.2);
-    float kineticEnergy=pow(length(objectData[objectIndex].velocity),2);
-    float foam=kineticEnergy*velocityDiff;
-    objectData[objectIndex].color.x+=min(foam*deltaTime,1)*foamFactor;
-    objectData[objectIndex].color.x=pow(objectData[objectIndex].color.x,1-foamDecay*deltaTime);
     return;
 }
 float ConvertDensityToPressure(float d){
@@ -265,6 +255,7 @@ vec3 CalculatePressureForce(uint objectIndex){
 }
 vec3 CalculateViscousityForce(uint objectIndex){
      vec3 viscousityForce=vec3(0,0,0);
+    float velocityDiff=0.0;
     ivec3 currCell=GetCell3D(objectIndex);    
     //objectData[objectIndex].color.xyz=vec3(currCell)/3;
     for (uint cellOffsetIndex=0;cellOffsetIndex<27;cellOffsetIndex++){
@@ -285,9 +276,17 @@ vec3 CalculateViscousityForce(uint objectIndex){
             float influence=SmoothingKernel(objectData[neighborIndex].radius,dst);
             float d = max(objectData[objectIndex].density, 0.2);
             vec3 diff=objectData[neighborIndex].velocity-objectData[objectIndex].velocity;
-            viscousityForce+=diff*influence*viscousityMultiplier*d;    
+            viscousityForce+=diff*influence*viscousityMultiplier*d; 
+            float foamInfluence=1-min(1,dst/objectData[neighborIndex].radius);
+            float vDiff=length(diff);
+            float convergence=(1-dot(normalize(diff),normalize(-dir)))*0.5;
+            velocityDiff+=foamInfluence*vDiff*convergence;
         }
     }
+    float kineticEnergy=pow(length(objectData[objectIndex].velocity),2);
+    float foam=velocityDiff*kineticEnergy;
+    objectData[objectIndex].color.x+=min(foam*deltaTime,1.0)*foamFactor;
+    objectData[objectIndex].color.x*=pow(2,1-foamDecay*deltaTime);
     return viscousityForce;
 }
 void Collision(uint objectIndex) {
@@ -328,7 +327,15 @@ void UpdateSpatialHash(uint objectIndex){
     indexData[objectIndex].sphereIndex=objectIndex;
     indexData[objectIndex].hash=hash;
     indexData[objectIndex].cellKey=key;
+}
+void Gravity(uint objectIndex){
+if (objectData[objectIndex].color.x<0.2){
+    objectData[objectIndex].velocity.y -= gravity*deltaTime;
     }
+    else{
+        objectData[objectIndex].velocity.y -= gravity*deltaTime*0.1;
+    }
+}
 void main() {
 
     memoryBarrierBuffer();
@@ -338,7 +345,7 @@ void main() {
 
     //gravity
     
-    objectData[i].velocity.y -= gravity*deltaTime;
+    Gravity(i);
 
     //pressure
     
