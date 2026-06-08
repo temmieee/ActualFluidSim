@@ -9,7 +9,7 @@ const vec3 scatteringCoefficients=vec3(0.3,0.2,0.1);
 const vec3 sunDirection=normalize(vec3(2,1,2));
 const float lightMarchStepSize = 0.015;
 const float raymarchStep = 0.001;
-const float densityMultiplier=2;
+const float densityMultiplier=5;
 const float tileScale=0.01;
 
 const float smallParticleThreshold=0.75;
@@ -542,7 +542,7 @@ void main() {
     float y = float(pixelCoords.y * 2 - dimensions.y) / float(dimensions.y);
     float x = float(pixelCoords.x * 2 - dimensions.x) / float(dimensions.y);
 
-    vec3 cameraPos = vec3(0, 45.0, -100);
+    vec3 cameraPos = vec3(0, 45.0, -120);
     vec3 rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
     vec3 rayDir = normalize(rayOrigin - cameraPos);
 
@@ -560,7 +560,7 @@ void main() {
         vec3 raymarchLight=raymarchHitInfo.color;
         vec3 surface=RenderSurface(ray,rngState);
         //light+=mix(raymarchLight,surface,surface);
-        light+=mix(surface,raymarchLight,1);
+        light=mix(surface,raymarchLight,1);
         //light+=raymarchLight;
     }
     light = light / repetition;

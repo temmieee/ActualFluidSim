@@ -26,7 +26,7 @@ const unsigned int threadCount = 32;
 const float maxRotationSpeed = 0.05f;
 const float maxTranslationSpeed = 1.f;
 const float boxGravity = 40.f;
-
+const float sphereRadius =2.;
 float downwardSpeed = 0.0000f;
 GLfloat vertices[] =
 {
@@ -298,7 +298,7 @@ void CreateSphereArray(static std::vector<Sphere>& spheres, float center[], floa
 		float positionX = center[0] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[0];
 		float positionY = center[1] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[1];
 		float positionZ = center[2] + ((static_cast<float>(rand()) / RAND_MAX) * 2 - 1) * bound[2];
-		float radius = 1.0f;
+		float radius = sphereRadius;
 
 		float colorR = 0;
 		float colorG = 0;
@@ -308,7 +308,7 @@ void CreateSphereArray(static std::vector<Sphere>& spheres, float center[], floa
 		Sphere newSphere(new float[] {
 			positionX, positionY, positionZ, radius,
 				colorR, colorG, colorB, colorA,
-				0, 0, 0, 0.1f
+				0, 0, 0, 1.f
 			});
 		spheres.push_back(newSphere);
 	}
@@ -525,14 +525,14 @@ int main() {
 	glfwSwapInterval(vSync);
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
-	float bounds[3] = {25.f, 25.f, 25.f };
-	float center1[3] = { -0.f, 30.f, 0.f };
+	float bounds[3] = {30.f, 30.f, 30.f };
+	float center1[3] = { -0.f, 60.f, 0.f };
 	float center2[3] = { 45.f, 50.f, 0.f };
 	int amount =36000;
-	float simulationBoundsScale[3] = { 30.f, 30.f, 30.f };
+	float simulationBoundsScale[3] = { 55.f, 55.f, 55.f };
 	float simulationBoundsPosition[3] = { 0, simulationBoundsScale[1]+10, 0 };
 	float simulationBoundsRotation[3] = { 0, 0.3, 0 };
-	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 4,simulationBoundsScale[1] * 4,simulationBoundsScale[2] * 4};
+	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 2,simulationBoundsScale[1] * 2,simulationBoundsScale[2] * 2};
 	std::vector<Sphere> spheres;
 	CreateSphereArray(spheres,center1, bounds, amount);
 	//CreateSphereArray(spheres, center2, bounds, amount);
@@ -545,7 +545,6 @@ int main() {
 	Mat4 inverseBoundsMatrix = CalculateInverseModelMatrix(simulationBoundsPosition, simulationBoundsRotation, simulationBoundsScale);
 	const double targetDeltaPhysics = 1.0 / 240;
 	const double targetDeltaRender = 1.0 / 60.0;
-	double physicsTracker = 0;
 	double renderTracker = 0;
 	double trackedTime = 0;
 	unsigned int physicsFrames = 0;
@@ -556,12 +555,11 @@ int main() {
 		double frameStart = timer.Tick();
 		
 		//UpdateFrame
-		if (physicsTracker>targetDeltaPhysics){
-			UpdatePhysics(res, spheres, simulationBoundsScale, simulationBoundsPosition, boundsMatrix, inverseBoundsMatrix);
-			physicsTracker = 0;
-			physicsFrames++;
-		}
 		if (renderTracker > targetDeltaRender) {
+			for (unsigned int i = 0; i < targetDeltaRender / targetDeltaPhysics; i++) {
+				UpdatePhysics(res, spheres, simulationBoundsScale, simulationBoundsPosition, boundsMatrix, inverseBoundsMatrix);
+				physicsFrames++;
+			}
 			RenderFrame(res, spheres, simulationBoundsScale, simulationBoundsPosition,densityResolution, boundsMatrix, inverseBoundsMatrix);
 			renderTracker = 0;
 			renderFrames++;
@@ -571,7 +569,6 @@ int main() {
 		double frameEnd = timer.GetDelta();
 		double elapsed = frameEnd;
 
-		physicsTracker += elapsed;
 		renderTracker += elapsed;
 		trackedTime += elapsed;
 		if (trackedTime > 1.0) {
