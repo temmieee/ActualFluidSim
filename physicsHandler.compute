@@ -3,16 +3,16 @@
 const float PI=3.14159265359;
 const float minDensity = 1;
 const float defaultDensity=0.6;
-const float stiffness=10000;
-const float collisionDamping=0.7;
+const float stiffness=20000;
+const float collisionDamping=0.5;
 const float boundsElectroMagneticRepulsion = 5.;
 const float boundsRepulsionRadius=0.01;
-const float deltaTime=1.f/120.f;
-const float viscousityMultiplier=0.2f;
+const float deltaTime=1.f/180.f;
+const float viscousityMultiplier=0.1f;
 const float foresight=1.f/60.f;
 const float foamFactor=100.1f;
 const float foamDecay=2.01;
-const float maxFoam=5;
+const float maxFoam=1;
 const float alternatePressureFactor = 10;
 
 struct SphereIndex{

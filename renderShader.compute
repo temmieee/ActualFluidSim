@@ -8,12 +8,12 @@ const float inverseLightSpeedInAir=1;
 const vec3 scatteringCoefficients=vec3(0.7,0.3,0.2);
 const vec3 scatteringCoefficientsDepth=vec3(0.1,0.3,0.2);
 const vec3 sunDirection=normalize(vec3(2,1,2));
-const float lightMarchStepSize = 0.01;
-const float raymarchStep = 0.0025;
+const float lightMarchStepSize = 0.015;
+const float raymarchStep = 0.005;
 const float densityMultiplier=60;
 const float tileScale=0.01;
 
-const float foamAlpha=0.5;
+const float foamAlpha=0.1;
 struct Ray {
     vec3 origin;
     vec3 direction;

@@ -13,22 +13,29 @@
 #include <algorithm>
 
 
-const unsigned int SCREEN_WIDTH = 2248;
-const unsigned int SCREEN_HEIGHT = 1224;
+const unsigned int SCREEN_WIDTH = 1536;
+const unsigned int SCREEN_HEIGHT = 1024;
 
 const unsigned short OPENGL_MAJOR_VERSION = 4;
 const unsigned short OPENGL_MINOR_VERSION = 6;
-
 bool vSync = true;
 
+const unsigned int threadCount = 32;
+
+//render settings
 const float FOV = 90.0f;
 const float viewPosition[] = {0,0,0};
 const float viewRotation[] = {0,0,0};
-const unsigned int threadCount = 32;
+
+//particle settings
+const float particleGravity = 200;
+const float sphereRadius = 2.25;
+
+//bounding box settings
 const float maxRotationSpeed = 0.05f;
 const float maxTranslationSpeed = 0.5f;
-const float boxGravity = 20.f;
-const float sphereRadius =2.25;
+const float boxGravity = 120.f;
+const float floorHeight = 5.f;
 float downwardSpeed = 0.0000f;
 GLfloat vertices[] =
 {
@@ -370,7 +377,7 @@ bool Sort(RenderResources& res, unsigned int objectAmount) {
 bool UpdatePhysics(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[], float boundsPosition[], Mat4& boundsMatrix, Mat4& inverseBoundsMatrix) {
 	unsigned int objectAmount = spheresArray.size();
 	res.physicsShader.Activate();
-	glUniform1f(res.physicsGravity, 30.0f);
+	glUniform1f(res.physicsGravity, particleGravity);
 	glUniform1ui(res.physicsObjectAmount, objectAmount);
 	glUniform3f(res.physicsBounds, bounds[0], bounds[1], bounds[2]);
 	glUniform3f(res.physicsBoundsPosition, boundsPosition[0], boundsPosition[1], boundsPosition[2]);
@@ -502,8 +509,8 @@ void HandleInputs(GLFWwindow* window,
 						world[row] += local[col] * boundsMatrix[col][row];
 					}
 				}
-				if (world[1] < 2.0f) {
-					float depth = 2.0f -world[1];
+				if (world[1] < floorHeight) {
+					float depth = floorHeight -world[1];
 					if (depth > penetrationDepth) {
 						penetrationDepth = depth;
 					}
@@ -529,8 +536,8 @@ int main() {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, OPENGL_MINOR_VERSION);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-	glfwWindowHint(GLFW_POSITION_X, 70);
-	glfwWindowHint(GLFW_POSITION_Y, 83);
+	glfwWindowHint(GLFW_POSITION_X, 100);
+	glfwWindowHint(GLFW_POSITION_Y, 100);
 
 	GLFWwindow* window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Temmie", NULL, NULL);
 
@@ -542,7 +549,7 @@ int main() {
 	float bounds[3] = {40, 40, 40 };
 	float center1[3] = { -0.f, 70.f, 0.f };
 	float center2[3] = { 45.f, 50.f, 0.f };
-	int amount =50000;
+	int amount =36000;
 	float simulationBoundsScale[3] = { 65.f, 65.f, 65.f };
 	float simulationBoundsPosition[3] = { 0, simulationBoundsScale[1]+10, 0 };
 	float simulationBoundsRotation[3] = { 0, 0.0, 0 };
@@ -557,8 +564,8 @@ int main() {
 
 	Mat4 boundsMatrix = CalculateModelMatrix(simulationBoundsPosition, simulationBoundsRotation, simulationBoundsScale);
 	Mat4 inverseBoundsMatrix = CalculateInverseModelMatrix(simulationBoundsPosition, simulationBoundsRotation, simulationBoundsScale);
-	const double targetDeltaPhysics = 1.0 / 120;
-	const double targetDeltaRender = 1.0 / 30.0;
+	const double targetDeltaPhysics = 1.0 / 180;
+	const double targetDeltaRender = 1.0 / 60.0;
 	double renderTracker = 0;
 	double trackedTime = 0;
 	unsigned int physicsFrames = 0;
