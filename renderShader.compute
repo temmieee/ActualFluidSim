@@ -2,17 +2,18 @@
 const float PI=3.14159265359;
 const float kEpsilon = 0.00001;
 const float epsilon=0.01;
-const float inverseLightSpeedInFluid=1.93;
+const float inverseLightSpeedInFluid=1.33;
 const float inverseLightSpeedInAir=1;
 
-const vec3 scatteringCoefficients=vec3(0.3,0.2,0.1);
+const vec3 scatteringCoefficients=vec3(0.7,0.3,0.2);
+const vec3 scatteringCoefficientsDepth=vec3(0.1,0.3,0.2);
 const vec3 sunDirection=normalize(vec3(2,1,2));
-const float lightMarchStepSize = 0.015;
-const float raymarchStep = 0.001;
-const float densityMultiplier=5;
+const float lightMarchStepSize = 0.01;
+const float raymarchStep = 0.0025;
+const float densityMultiplier=60;
 const float tileScale=0.01;
 
-const float smallParticleThreshold=0.75;
+const float foamAlpha=0.5;
 struct Ray {
     vec3 origin;
     vec3 direction;
@@ -75,7 +76,7 @@ uniform vec3 boundsPosition;
 uniform uvec3 resolution;
 uniform mat4 boundsMatrix;
 uniform mat4 inverseBoundsMatrix;
-
+uniform mat4 inverseViewMatrix;
 
 //spatial hashing
 const ivec3 offsets3D[] =
@@ -187,7 +188,7 @@ vec3 BoundsTest(Ray ray){
 }
 vec3 FloorTest(Ray ray){
 	float dist=-1;
-    vec3 maxBound=vec3(1000,0,1000);
+    vec3 maxBound=vec3(1000,1,1000);
     vec3 minBound=vec3(-1000,-1,-1000);
 	vec3 t1=(maxBound-ray.origin)*ray.inverseDir;
 	vec3 t2=(minBound-ray.origin)*ray.inverseDir;
@@ -258,9 +259,9 @@ vec3 Transmittance(float density){
 }
 vec3 SampleSky(vec3 dir)
 {
-    const vec3 colGround     = vec3(0.5, 0.5, 0.5);
+    const vec3 colGround     = vec3(0.4, 0.4, 0.4);
     const vec3 colSkyHorizon = vec3(1.0, 1.0, 1.0);
-    const vec3 colSkyZenith  = vec3(0.05, 0.3, 0.75);
+    const vec3 colSkyZenith  = vec3(0.3, 0.5, 0.6);
 
     // Sun highlight
     float sun = pow(max(0.0, dot(dir, sunDirection)), 500.0);
@@ -287,8 +288,8 @@ vec3 SampleEnvironment(Ray ray)
     {
         vec3 hitPos=ray.origin+ray.direction*floorInfo.x;
         // Choose tileCol based on quadrant
-        vec3 tileCol = hitPos.x < 0 ? vec3(1,0,0) : vec3(0,1,0);
-        if (hitPos.z < 0) tileCol = hitPos.x < 0 ? vec3(1,1,0) : vec3(0,0,1);
+        vec3 tileCol = hitPos.x < 0 ? vec3(1,0.25,0.25) : vec3(0.5,1,0.25);
+        if (hitPos.z < 0) tileCol = hitPos.x < 0 ? vec3(1,1,0.25) : vec3(0.25,0.25,1);
 
         // If tile is a dark tile, then darken it
         ivec2 tileCoord = ivec2(floor(hitPos.xz * tileScale));
@@ -301,7 +302,7 @@ vec3 SampleEnvironment(Ray ray)
         vec3 randomVariation=rngState*0.1;
         tileCol +=randomVariation;
         
-        vec3 shadowMap = vec3(Transmittance(DensityAlongRay(TransformRayToLocalSpace(InitRay(hitPos,sunDirection),inverseBoundsMatrix), lightMarchStepSize * 1,0)));
+        vec3 shadowMap = vec3(Transmittance(DensityAlongRay(TransformRayToLocalSpace(InitRay(hitPos,sunDirection),inverseBoundsMatrix), lightMarchStepSize * 2,2)));
         return tileCol * min(shadowMap,1);
     }
 
@@ -357,20 +358,20 @@ vec3 CalculateClosestFaceNormal(vec3 position)
     }
 }
 vec3 CalculateNormal(vec3 position){
-    const float s = 0.05;
+    const float s = 0.005;
     vec3 offsetX = vec3(1.0, 0.0, 0.0) * s;
     vec3 offsetY = vec3(0.0, 1.0, 0.0) * s;
     vec3 offsetZ = vec3(0.0, 0.0, 1.0) * s;
-    float dx = SampleDensityFromTexture(position - offsetX,0) - SampleDensityFromTexture(position + offsetX,0);
-    float dy = SampleDensityFromTexture(position - offsetY,0) - SampleDensityFromTexture(position + offsetY,0);
-    float dz = SampleDensityFromTexture(position - offsetZ,0) - SampleDensityFromTexture(position + offsetZ,0);
+    float dx = SampleDensityFromTexture(position - offsetX,2) - SampleDensityFromTexture(position + offsetX,2);
+    float dy = SampleDensityFromTexture(position - offsetY,2) - SampleDensityFromTexture(position + offsetY,2);
+    float dz = SampleDensityFromTexture(position - offsetZ,2) - SampleDensityFromTexture(position + offsetZ,2);
 
     vec3 volumeNormal = normalize(vec3(dx, dy, dz));
     vec3 o = 1 - abs(position);
     float faceWeight = min(o.x, min(o.y, o.z));
     vec3 faceNormal = CalculateClosestFaceNormal(position);
-     const float smoothDst = 0.001;
-    const float smoothPow = 20.50;
+     const float smoothDst = 0.005;
+    const float smoothPow = 10.50;
 
     faceWeight = (1.0 - smoothstep(0.0, smoothDst, faceWeight)) *
                  (1.0 - pow(clamp(volumeNormal.y, 0.0, 1.0), smoothPow));
@@ -451,7 +452,7 @@ HitInfo FindNextSurface(Ray ray, bool findNextEntryPoint, uint rngState, float r
         {
             info.position = lastPosInFluid;
             info.hit = true;
-            info.normal = CalculateNormal(lastPosInFluid);
+            info.normal = info.position;
             break;
         }
     }
@@ -478,23 +479,23 @@ RaymarchHitInfo GetRaymarchHitInfoFromRay(Ray ray, inout uint rngState, uint ite
         raymarchHitInfo.hit=true;    
         transmittance *= Transmittance(nextSurface.density);
         
-        vec3 normal= nextSurface.normal;
+        vec3 normal= CalculateNormal(nextSurface.position);
         if (dot(normal,localRay.direction)>0) normal=-normal;
         float indexofRefractionSource=isInFluid?inverseLightSpeedInFluid:inverseLightSpeedInAir;
         float indexofRefractionDestination=isInFluid?inverseLightSpeedInAir:inverseLightSpeedInFluid;
         LightBehaviour lightBehaviour=CalculateReflectionAndRefraction(localRay.direction,normal,indexofRefractionSource,indexofRefractionDestination);
         Ray refractRay=InitRay(nextSurface.position,lightBehaviour.refractDir);
         Ray reflectRay=InitRay(nextSurface.position,lightBehaviour.reflectDir);
-        float densityAlongRefractRay=DensityAlongRay(refractRay,raymarchStep,0);
-        float densityAlongReflectRay = DensityAlongRay(reflectRay, raymarchStep, 0);
+        float densityAlongRefractRay=DensityAlongRay(refractRay,lightMarchStepSize,0);
+        float densityAlongReflectRay = DensityAlongRay(reflectRay, lightMarchStepSize, 0);
         bool isRefracted=lightBehaviour.refractWeight > lightBehaviour.reflectWeight;
         isInFluid=isRefracted!=isInFluid;
         if (!isRefracted){
-        //  light += SampleEnvironment(refractRay)*transmittance*Transmittance(densityAlongRefractRay)*pow(lightBehaviour.refractWeight,1);
+          light += SampleEnvironment(refractRay)*transmittance*Transmittance(densityAlongRefractRay)*pow(lightBehaviour.refractWeight,1);
             //light+=vec3(0,0,1)*0.1;
         }
         else{
-        //   light += SampleEnvironment(reflectRay)*transmittance*Transmittance(densityAlongReflectRay)*pow(lightBehaviour.reflectWeight,1);
+           light += SampleEnvironment(reflectRay)*transmittance*Transmittance(densityAlongReflectRay)*pow(lightBehaviour.reflectWeight,1);
             //light+=vec3(0,1,0)*0.1;
         }
         //transmittance = max(transmittance, vec3(0.001));
@@ -504,7 +505,7 @@ RaymarchHitInfo GetRaymarchHitInfoFromRay(Ray ray, inout uint rngState, uint ite
         raymarchHitInfo.position=normal;
     }
     //if (!raymarchHitInfo.hit) return raymarchHitInfo;
-    float densityRemainder = DensityAlongRay(localRay, lightMarchStepSize,2);
+    float densityRemainder = DensityAlongRay(localRay, raymarchStep,2);
     light+=SampleEnvironment(localRay)*transmittance*Transmittance(densityRemainder);
     raymarchHitInfo.color=light;
     return raymarchHitInfo;
@@ -512,26 +513,43 @@ RaymarchHitInfo GetRaymarchHitInfoFromRay(Ray ray, inout uint rngState, uint ite
 vec3 RenderSurface(Ray ray, uint rngState){
     Ray localRay=TransformRayToLocalSpace(ray,inverseBoundsMatrix);
     vec3 boxDist=BoundsTest(localRay);
-    if (boxDist.x < 0) return SampleEnvironment(localRay);
+    if (boxDist.x < 0) return vec3(0);
     bool isInFluid=IsInFluid(localRay.origin);
     float foam=DensityAlongRay(localRay,raymarchStep,1);
     HitInfo nextSurface=FindNextSurface(localRay,isInFluid,rngState,1,boxDist.z);
-    if (!nextSurface.hit) return  SampleEnvironment(localRay);
-    float depth=DensityAlongRay(localRay, raymarchStep,0);
-    float smallParticle=smallParticleThreshold-min(depth,smallParticleThreshold);
-    float totalWhite=smallParticle*0.+foam;
-    vec3 transmittence=Transmittance(depth);
-    vec3 depthColor=pow(transmittence,vec3(1));
-    vec3 normal= nextSurface.normal;
-    if (dot(normal,localRay.direction)>0) normal=-normal;
-    float indexofRefractionSource=isInFluid?inverseLightSpeedInFluid:inverseLightSpeedInAir;
-    float indexofRefractionDestination=isInFluid?inverseLightSpeedInAir:inverseLightSpeedInFluid;
-    LightBehaviour lightBehaviour=CalculateReflectionAndRefraction(localRay.direction,normal,indexofRefractionSource,indexofRefractionDestination);
-    Ray refractRay=InitRay(nextSurface.position,lightBehaviour.refractDir);
-    Ray reflectRay=InitRay(nextSurface.position,lightBehaviour.reflectDir);
-    vec3 reflection=SampleEnvironment(reflectRay)*lightBehaviour.reflectWeight;
-    vec3 refraction=SampleEnvironment(refractRay)*lightBehaviour.refractWeight*transmittence;
-    vec3 totalSurfaceLight = vec3(totalWhite) + reflection + refraction;
+    if (!nextSurface.hit) return  vec3(0);
+    float depth=0;
+    vec3 depthColor=vec3(0);
+    vec3 transmittence=vec3(0);
+    float step=raymarchStep*3;
+    float tNear = boxDist.x;
+    float tFar = boxDist.z;
+    tFar -= step * (0.5+epsilon);
+    while (tNear<tFar){
+        vec3 samplePosition=localRay.origin + localRay.direction * tNear;
+        float density = SampleDensityFromTexture(samplePosition,2) * step*densityMultiplier;
+        vec3 samplePositionWS=(boundsMatrix*vec4(samplePosition,1)).xyz;
+        Ray sunRay=InitRay(samplePositionWS,sunDirection);
+        sunRay=TransformRayToLocalSpace(sunRay,inverseBoundsMatrix);
+        float densityAlongSunRay=DensityAlongRay(sunRay,lightMarchStepSize*5,2);
+        vec3 transmittedSunLight=Transmittance(densityAlongSunRay);
+        vec3 inScatteredLight=transmittedSunLight*density*scatteringCoefficientsDepth;
+        depth+=density;
+        tNear+=step;
+        depthColor+=inScatteredLight*Transmittance(depth);
+    }    
+    transmittence=Transmittance(depth);
+    //vec3 normal= CalculateNormal(nextSurface.position);
+    //if (dot(normal,localRay.direction)>0) normal=-normal;
+    //float indexofRefractionSource=isInFluid?inverseLightSpeedInFluid:inverseLightSpeedInAir;
+    //float indexofRefractionDestination=isInFluid?inverseLightSpeedInAir:inverseLightSpeedInFluid;
+    //LightBehaviour lightBehaviour=CalculateReflectionAndRefraction(localRay.direction,normal,indexofRefractionSource,indexofRefractionDestination);
+    //Ray refractRay=InitRay(nextSurface.position,lightBehaviour.refractDir);
+    //Ray reflectRay=InitRay(nextSurface.position,lightBehaviour.reflectDir);
+    //vec3 reflection=SampleEnvironment(reflectRay)*lightBehaviour.reflectWeight;
+    //vec3 refraction=SampleEnvironment(refractRay)*lightBehaviour.refractWeight*transmittence;
+    //vec3 totalSurfaceLight = vec3(totalWhite)+refraction+reflection+depthColor;
+    vec3 totalSurfaceLight = vec3(foam*foamAlpha)+depthColor;
     return totalSurfaceLight;
     }
 void main() {
@@ -542,7 +560,7 @@ void main() {
     float y = float(pixelCoords.y * 2 - dimensions.y) / float(dimensions.y);
     float x = float(pixelCoords.x * 2 - dimensions.x) / float(dimensions.y);
 
-    vec3 cameraPos = vec3(0, 45.0, -120);
+    vec3 cameraPos = vec3(0, 65.0, -140);
     vec3 rayOrigin = cameraPos + vec3(x, y, 1/tan(halffov * 3.14 / 180));
     vec3 rayDir = normalize(rayOrigin - cameraPos);
 
@@ -556,11 +574,11 @@ void main() {
     rayDir = normalize(rayOrigin - cameraPos);
     for (int j = 0; j < repetition; j++) {
         Ray ray=InitRay(rayOrigin, rayDir);
-        RaymarchHitInfo raymarchHitInfo=GetRaymarchHitInfoFromRay(ray,rngState,3);
+        RaymarchHitInfo raymarchHitInfo=GetRaymarchHitInfoFromRay(ray,rngState,5);
         vec3 raymarchLight=raymarchHitInfo.color;
         vec3 surface=RenderSurface(ray,rngState);
         //light+=mix(raymarchLight,surface,surface);
-        light=mix(surface,raymarchLight,1);
+        light=mix(raymarchLight,raymarchLight+surface,1);
         //light+=raymarchLight;
     }
     light = light / repetition;

@@ -2,16 +2,17 @@
 
 const float PI=3.14159265359;
 const float minDensity = 1;
-const float targetDensity=0.5;
+const float defaultDensity=0.6;
 const float stiffness=10000;
-const float collisionDamping=0.5;
-const float boundsElectroMagneticRepulsion = 35.;
+const float collisionDamping=0.7;
+const float boundsElectroMagneticRepulsion = 5.;
 const float boundsRepulsionRadius=0.01;
 const float deltaTime=1.f/120.f;
-const float viscousityMultiplier=0.01f;
+const float viscousityMultiplier=0.2f;
 const float foresight=1.f/60.f;
-const float foamFactor=0.001f;
-const float foamDecay=120.5;
+const float foamFactor=100.1f;
+const float foamDecay=2.01;
+const float maxFoam=5;
 const float alternatePressureFactor = 10;
 
 struct SphereIndex{
@@ -90,6 +91,10 @@ const uint hashK3 = 440817757;
 ivec3 GetCell3D(uint objectIndex)
 {
     return ivec3(floor(objectData[objectIndex].predictedPosition /objectData[objectIndex].radius));
+}
+ivec3 GetCell3DFromPosition(vec3 position)
+{
+    return ivec3(floor(position /objectData[0].radius));
 }
 
 // Hash cell coordinate to a single unsigned integer
@@ -171,7 +176,32 @@ float ConvertDensityToPressure(float d)
 }
 float DensityConstraint(float density)
 {
-    return density / targetDensity - 1;
+    return density / defaultDensity - 1;
+}
+float CalculatePointDensity(vec3 position){
+    float density=0.0;
+    ivec3 currCell=GetCell3DFromPosition(position);    
+    for (uint cellOffsetIndex=0;cellOffsetIndex<27;cellOffsetIndex++){
+        uint hash=HashCell3D(currCell+offsets3D[cellOffsetIndex]);
+        uint key=KeyFromHash(hash);
+        uint spatialIndex=spatialIndexData[key];
+        while (spatialIndex<objectAmount)
+        {
+            
+            SphereIndex currIndexData=indexData[spatialIndex];
+            spatialIndex++;
+            if (currIndexData.cellKey!=key) break;
+            if (currIndexData.hash!=hash) continue;
+            uint neighborIndex=currIndexData.sphereIndex;
+            vec3 dir=(objectData[neighborIndex].predictedPosition-position);
+            float dst=max(length(dir),0.001);            
+            if (dst > objectData[0].radius) continue;
+            density+=DensityKernel(objectData[neighborIndex].radius,dst);
+        }
+    
+    }
+    density =density;
+    return density;
 }
 
 void CalculateFutureSphereDensity(uint objectIndex){
@@ -224,8 +254,8 @@ void CalculatePressureForce(uint objectIndex,out vec3 pressureForce,out  vec3 al
             float dst = max(length(dir), 0.001);
             if (dst > objectData[objectIndex].radius) continue;
             uint seed=uint(objectData[neighborIndex].density*65436);
-            //dir = dst == 0 ? GetRandomDirection(seed) : normalize(dir);
-            dir = dst == 0 ? vec3(0,1,0) : normalize(dir);
+            dir = dst == 0 ? GetRandomDirection(seed) : normalize(dir);
+            //dir = dst == 0 ? vec3(0,1,0) : normalize(dir);
             float slope=DensityDerivative(objectData[neighborIndex].radius,dst);
             float neighborDensity=max(objectData[neighborIndex].density,minDensity);
             float sharedPressure=(ConvertDensityToPressure(neighborDensity)+currPressure)*0.5;
@@ -236,41 +266,60 @@ void CalculatePressureForce(uint objectIndex,out vec3 pressureForce,out  vec3 al
     pressureForce *= stiffness;
 }
 vec3 CalculateViscousityForce(uint objectIndex){
-     vec3 viscousityForce=vec3(0,0,0);
-    float velocityDiff=0.0;
-    ivec3 currCell=GetCell3D(objectIndex);    
-    //objectData[objectIndex].color.xyz=vec3(currCell)/3;
-    for (uint cellOffsetIndex=0;cellOffsetIndex<27;cellOffsetIndex++){
-        uint hash=HashCell3D(currCell+offsets3D[cellOffsetIndex]);
-        uint key=KeyFromHash(hash);
-        uint spatialIndex=spatialIndexData[key];
-        while (spatialIndex<objectAmount)
-        {
-            SphereIndex currIndexData=indexData[spatialIndex];
+    vec3 viscousityForce = vec3(0);
+    float smoothedEnergy = 0.0;
+    float vorticityStrength = 0.0;
+    float dissipation = 0.0;
+
+    ivec3 currCell = GetCell3D(objectIndex);
+
+    for (uint cellOffsetIndex = 0; cellOffsetIndex < 27; cellOffsetIndex++) {
+        uint hash = HashCell3D(currCell + offsets3D[cellOffsetIndex]);
+        uint key = KeyFromHash(hash);
+        uint spatialIndex = spatialIndexData[key];
+
+        while (spatialIndex < objectAmount) {
+            SphereIndex currIndexData = indexData[spatialIndex];
             spatialIndex++;
-            if (currIndexData.cellKey!=key) break;
-            if (currIndexData.hash!=hash) continue;
-            uint neighborIndex=currIndexData.sphereIndex;
-            if (neighborIndex==objectIndex) continue;
-            vec3 dir=(objectData[neighborIndex].predictedPosition-objectData[objectIndex].predictedPosition);
-            float dst=length(dir);
-            if (dst>objectData[objectIndex].radius) continue;
-            float influence=SmoothingKernel(objectData[neighborIndex].radius,dst);
+            if (currIndexData.cellKey != key) break;
+            if (currIndexData.hash != hash) continue;
+
+            uint neighborIndex = currIndexData.sphereIndex;
+            if (neighborIndex == objectIndex) continue;
+
+            vec3 dir = objectData[neighborIndex].predictedPosition - objectData[objectIndex].predictedPosition;
+            float dst = length(dir);
+            if (dst > objectData[objectIndex].radius) continue;
+
+            float influence = SmoothingKernel(objectData[neighborIndex].radius, dst);
             float d = max(objectData[objectIndex].density, minDensity);
-            vec3 diff=objectData[neighborIndex].velocity-objectData[objectIndex].velocity;
-            viscousityForce+=diff*influence*viscousityMultiplier*d; 
-            float foamInfluence=1-min(1,dst/objectData[neighborIndex].radius);
-            float vDiff=length(diff);
-            float convergence=(1-dot(normalize(diff),normalize(-dir)))*0.5;
-            velocityDiff+=foamInfluence*vDiff*convergence;
+
+            // viscosity force
+            vec3 diff = objectData[neighborIndex].velocity - objectData[objectIndex].velocity;
+            viscousityForce += diff * influence * viscousityMultiplier * d;
+
+            // smoothed kinetic energy
+            float neighborEnergy = 0.5 * pow(length(objectData[neighborIndex].velocity), 2);
+            smoothedEnergy += neighborEnergy * influence;
+
+            // vorticity contribution (curl approximation)
+            vorticityStrength += length(cross(diff, normalize(dir))) * influence;
+
+            dissipation += dot(diff, diff) * influence * viscousityMultiplier;
         }
     }
-    float kineticEnergy=pow(length(objectData[objectIndex].velocity),2);
-    float foam=velocityDiff*kineticEnergy;
-    objectData[objectIndex].color.x+=min(foam*deltaTime,1.0)*foamFactor;
-    objectData[objectIndex].color.x*=pow(2,1-foamDecay*deltaTime);
+
+    smoothedEnergy /= max(objectData[objectIndex].density, minDensity);
+
+    float foamContribution = (vorticityStrength + dissipation) * foamFactor * deltaTime;
+
+    objectData[objectIndex].color.x = clamp(objectData[objectIndex].color.x - foamDecay * deltaTime,0,maxFoam);
+    objectData[objectIndex].color.x += foamContribution;
+
     return viscousityForce;
 }
+
+
 void Collision(uint objectIndex) {
     vec3 localPosition = (inverseBoundsMatrix * vec4(objectData[objectIndex].position, 1)).xyz;
     
@@ -279,16 +328,22 @@ void Collision(uint objectIndex) {
     // Collision response
     if (abs(localPosition.x) > 1) {
         localPosition.x = sign(localPosition.x);
+        if (sign(localVelocity.x)==localPosition.x){        
         localVelocity.x *= -collisionDamping;
+        }
 
     }
     if (abs(localPosition.y) > 1) {
         localPosition.y = sign(localPosition.y);
+        if (sign(localVelocity.y)==localPosition.y){        
         localVelocity.y *= -collisionDamping;
+        }
     }
     if (abs(localPosition.z) > 1) {
         localPosition.z = sign(localPosition.z);
+        if (sign(localVelocity.z)==localPosition.z){        
         localVelocity.z *= -collisionDamping;
+        }
     }
     
     // Collision response
@@ -318,8 +373,8 @@ void Collision(uint objectIndex) {
     objectData[objectIndex].velocity = (boundsMatrix * vec4(localVelocity, 0)).xyz;
 }
 
-void PredictPosition(vec3 dx, uint objectIndex){
-    vec3 predictedVelocity = (objectData[objectIndex].velocity);
+void PredictPosition(uint objectIndex){
+    vec3 predictedVelocity = objectData[objectIndex].velocity;
     objectData[objectIndex].predictedPosition = objectData[objectIndex].position + predictedVelocity * foresight;
 }
 void UpdateSpatialHash(uint objectIndex){
@@ -331,12 +386,13 @@ void UpdateSpatialHash(uint objectIndex){
     indexData[objectIndex].cellKey=key;
 }
 void Gravity(uint objectIndex){
-if (objectData[objectIndex].color.x<0.1){
+if (objectData[objectIndex].color.x>0.5){
+    bool notsurface=CalculatePointDensity(objectData[objectIndex].predictedPosition+vec3(0,objectData[objectIndex].radius*1.0,0))>0.25;
+    if (notsurface){
+    return;
+    }
+    }    
     objectData[objectIndex].velocity.y -= gravity*deltaTime;
-    }
-    else{
-        objectData[objectIndex].velocity.y -= gravity*deltaTime*1;
-    }
 }
 void main() {
 
@@ -372,7 +428,8 @@ void main() {
     
     float kineticEnergy = pow(length(velocity), 2) * 0.5;
     float alternateKineticEnergy = pow(length(alternateVelocity), 2) * 0.5;
-    velocity = mix(velocity, alternateVelocity, clamp((kineticEnergy - alternateKineticEnergy)/alternateKineticEnergy, 0, 1));
+    //artificial dampening
+    if (length(velocity-alternateVelocity)<objectData[i].radius*5) velocity = mix(velocity, alternateVelocity, clamp((kineticEnergy - alternateKineticEnergy)/alternateKineticEnergy, 0, 1));
     
     velocity += viscousityForce / currDensity;
     objectData[i].velocity = velocity;
@@ -382,7 +439,7 @@ void main() {
     objectData[i].position += objectData[i].velocity * deltaTime;
     
     //update next prediction
-    PredictPosition(dx, i);
+    PredictPosition(i);
     //update spatial hash
     UpdateSpatialHash(i);
     

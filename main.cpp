@@ -13,8 +13,8 @@
 #include <algorithm>
 
 
-const unsigned int SCREEN_WIDTH = 1024;
-const unsigned int SCREEN_HEIGHT = 1024;
+const unsigned int SCREEN_WIDTH = 2248;
+const unsigned int SCREEN_HEIGHT = 1224;
 
 const unsigned short OPENGL_MAJOR_VERSION = 4;
 const unsigned short OPENGL_MINOR_VERSION = 6;
@@ -22,11 +22,13 @@ const unsigned short OPENGL_MINOR_VERSION = 6;
 bool vSync = true;
 
 const float FOV = 90.0f;
+const float viewPosition[] = {0,0,0};
+const float viewRotation[] = {0,0,0};
 const unsigned int threadCount = 32;
 const float maxRotationSpeed = 0.05f;
-const float maxTranslationSpeed = 1.f;
-const float boxGravity = 40.f;
-const float sphereRadius =2.;
+const float maxTranslationSpeed = 0.5f;
+const float boxGravity = 20.f;
+const float sphereRadius =2.25;
 float downwardSpeed = 0.0000f;
 GLfloat vertices[] =
 {
@@ -153,6 +155,7 @@ struct RenderResources {
 	GLuint densityBoundsMatrix;
 	GLuint renderInverseBoundsMatrix;
 	GLuint densityInverseBoundsMatrix;
+	GLuint renderInverseViewMatrix;
 	// Shaders
 	Shader screenShader;
 	Shader renderShader;
@@ -162,7 +165,7 @@ struct RenderResources {
 	RenderResources(const char* vertPath,	const char* fragPath,	const char* renderComputePath,	const char* physicsComputePath, const char* sortComputePath, const char* densityComputePath)
 		: screenShader(vertPath, fragPath),	renderShader(renderComputePath), physicsShader(physicsComputePath), sortShader(sortComputePath), densityShader(densityComputePath),
 		spheresBuffer(0), spatialBuffer(0), spatialIndexBuffer(0),
-		physicsObjectAmount(0), renderObjectAmount(0), sortObjectAmount(0), physicsGravity(0), physicsBounds(0), renderHalfFov(0), sortGroupWidth(0), sortGroupHeight(0), sortStepIndex(0), physicsBoundsPosition(0), renderBounds(0), renderBoundsPosition(0), densityBounds(0), densityBoundsPosition(0), densityResolution(0), densityObjectAmount(0), renderResolution(0), densityTex(0), physicsBoundsMatrix(0), physicsInverseBoundsMatrix(0), renderBoundsMatrix(0), densityBoundsMatrix(0), renderInverseBoundsMatrix(0), densityInverseBoundsMatrix(0),
+		physicsObjectAmount(0), renderObjectAmount(0), sortObjectAmount(0), physicsGravity(0), physicsBounds(0), renderHalfFov(0), sortGroupWidth(0), sortGroupHeight(0), sortStepIndex(0), physicsBoundsPosition(0), renderBounds(0), renderBoundsPosition(0), densityBounds(0), densityBoundsPosition(0), densityResolution(0), densityObjectAmount(0), renderResolution(0), densityTex(0), physicsBoundsMatrix(0), physicsInverseBoundsMatrix(0), renderBoundsMatrix(0), densityBoundsMatrix(0), renderInverseBoundsMatrix(0), densityInverseBoundsMatrix(0), renderInverseViewMatrix(0),
 		screenTex(0), VAO(0), VBO(0), EBO(0) {
 	}
 };
@@ -288,6 +291,7 @@ RenderResources InitRenderResources(std::vector<Sphere>& spheresArray, std::vect
 	res.physicsInverseBoundsMatrix = glGetUniformLocation(res.physicsShader.ID, "inverseBoundsMatrix");
 	res.renderInverseBoundsMatrix = glGetUniformLocation(res.renderShader.ID, "inverseBoundsMatrix");
 	res.densityInverseBoundsMatrix = glGetUniformLocation(res.densityShader.ID, "inverseBoundsMatrix");
+	res.renderInverseViewMatrix = glGetUniformLocation(res.renderShader.ID, "inverseViewMatrix");
 	return res;
 }
 
@@ -326,7 +330,7 @@ unsigned int BitAmount(unsigned int input) {
 	input++;
 	return input;
 }
-void Sort(RenderResources& res, unsigned int objectAmount) {
+bool Sort(RenderResources& res, unsigned int objectAmount) {
 	res.sortShader.Activate();
 	glUniform1ui(res.sortObjectAmount, objectAmount);
 
@@ -347,16 +351,23 @@ void Sort(RenderResources& res, unsigned int objectAmount) {
 			GLenum err = glGetError();
 			if (err != GL_NO_ERROR) {
 				std::cerr << "Sort dispatch failed with error code: " << err << std::endl;
+				return false;
 			}
 			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 		}
 	}
 	glUniform1ui(res.sortStepIndex, objectAmount + 1);
 	glDispatchCompute(GLuint(objectAmount / threadCount + 1), 1, 1);
+	GLenum err = glGetError();
+	if (err != GL_NO_ERROR) {
+		std::cerr << "Sort dispatch failed with error code: " << err << std::endl;
+		return false;
+	}
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+	return true;
 }
 
-void UpdatePhysics(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[], float boundsPosition[], Mat4& boundsMatrix, Mat4& inverseBoundsMatrix) {
+bool UpdatePhysics(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[], float boundsPosition[], Mat4& boundsMatrix, Mat4& inverseBoundsMatrix) {
 	unsigned int objectAmount = spheresArray.size();
 	res.physicsShader.Activate();
 	glUniform1f(res.physicsGravity, 30.0f);
@@ -368,7 +379,8 @@ void UpdatePhysics(RenderResources& res, std::vector<Sphere>& spheresArray, floa
 	glDispatchCompute(objectAmount / threadCount + 1, 1, 1);
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-	Sort(res, objectAmount); // keep sorting tied to physics
+	bool success=Sort(res, objectAmount); // keep sorting tied to physics
+	return success;
 }
 
 void RenderFrame(RenderResources& res, std::vector<Sphere>& spheresArray, float bounds[], float boundsPosition[], unsigned int densityResolution[], Mat4& boundsMatrix, Mat4& inverseBoundsMatrix) {
@@ -517,6 +529,8 @@ int main() {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, OPENGL_MINOR_VERSION);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	glfwWindowHint(GLFW_POSITION_X, 70);
+	glfwWindowHint(GLFW_POSITION_Y, 83);
 
 	GLFWwindow* window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Temmie", NULL, NULL);
 
@@ -525,14 +539,14 @@ int main() {
 	glfwSwapInterval(vSync);
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
-	float bounds[3] = {30.f, 30.f, 30.f };
-	float center1[3] = { -0.f, 60.f, 0.f };
+	float bounds[3] = {40, 40, 40 };
+	float center1[3] = { -0.f, 70.f, 0.f };
 	float center2[3] = { 45.f, 50.f, 0.f };
-	int amount =36000;
-	float simulationBoundsScale[3] = { 55.f, 55.f, 55.f };
+	int amount =50000;
+	float simulationBoundsScale[3] = { 65.f, 65.f, 65.f };
 	float simulationBoundsPosition[3] = { 0, simulationBoundsScale[1]+10, 0 };
-	float simulationBoundsRotation[3] = { 0, 0.3, 0 };
-	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 2,simulationBoundsScale[1] * 2,simulationBoundsScale[2] * 2};
+	float simulationBoundsRotation[3] = { 0, 0.0, 0 };
+	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 3,simulationBoundsScale[1] * 3,simulationBoundsScale[2] * 3};
 	std::vector<Sphere> spheres;
 	CreateSphereArray(spheres,center1, bounds, amount);
 	//CreateSphereArray(spheres, center2, bounds, amount);
@@ -543,21 +557,22 @@ int main() {
 
 	Mat4 boundsMatrix = CalculateModelMatrix(simulationBoundsPosition, simulationBoundsRotation, simulationBoundsScale);
 	Mat4 inverseBoundsMatrix = CalculateInverseModelMatrix(simulationBoundsPosition, simulationBoundsRotation, simulationBoundsScale);
-	const double targetDeltaPhysics = 1.0 / 240;
-	const double targetDeltaRender = 1.0 / 60.0;
+	const double targetDeltaPhysics = 1.0 / 120;
+	const double targetDeltaRender = 1.0 / 30.0;
 	double renderTracker = 0;
 	double trackedTime = 0;
 	unsigned int physicsFrames = 0;
 	unsigned int renderFrames = 0;
 	FrameTimer timer;
 	timer.Start();
-	while (!glfwWindowShouldClose(window)) {
+	bool success = true;
+	while (!glfwWindowShouldClose(window)&&success) {
 		double frameStart = timer.Tick();
 		
 		//UpdateFrame
 		if (renderTracker > targetDeltaRender) {
 			for (unsigned int i = 0; i < targetDeltaRender / targetDeltaPhysics; i++) {
-				UpdatePhysics(res, spheres, simulationBoundsScale, simulationBoundsPosition, boundsMatrix, inverseBoundsMatrix);
+				success=UpdatePhysics(res, spheres, simulationBoundsScale, simulationBoundsPosition, boundsMatrix, inverseBoundsMatrix);
 				physicsFrames++;
 			}
 			RenderFrame(res, spheres, simulationBoundsScale, simulationBoundsPosition,densityResolution, boundsMatrix, inverseBoundsMatrix);

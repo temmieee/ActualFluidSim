@@ -116,7 +116,7 @@ float FoamKernel(float radius, float dst) {
   	if (dst < radius)
 	{
 		float scale = 315 / (64 * PI * pow(abs(radius), 15));
-		float v = max(radius * radius - dst * dst-0.1,0);
+		float v = max(radius * radius - dst * dst-0.0,0);
 		return v * v * v * scale;
 	}
 	return 0;
@@ -127,7 +127,7 @@ float DensityKernel(float radius, float dst, uint rng)
 	
 		float scale = 15 / (2 * PI * pow(radius, 5));
         //float scale=0.5;
-		float v = radius-clamp(RandomValueNormalDistribution(rng),0.1,0.0)- dst;
+		float v = radius+clamp(RandomValueNormalDistribution(rng),0.1,0.0)- dst;
 		if (v < 0) return 0;
 		return v * scale;
 }
