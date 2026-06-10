@@ -5,15 +5,15 @@ const float minDensity = 1;
 const float defaultDensity=0.6;
 const float stiffness=20000;
 const float collisionDamping=0.5;
-const float boundsElectroMagneticRepulsion = 5.;
+const float boundsElectroMagneticRepulsion = 10.;
 const float boundsRepulsionRadius=0.01;
 const float deltaTime=1.f/180.f;
 const float viscousityMultiplier=0.1f;
-const float foresight=1.f/60.f;
-const float foamFactor=100.1f;
-const float foamDecay=2.01;
-const float maxFoam=1;
-const float alternatePressureFactor = 10;
+const float foresight=1.f/120.f;
+const float foamFactor=50.1f;
+const float foamDecay=15;
+const float maxFoam=25;
+const float alternatePressureFactor = 50;
 
 struct SphereIndex{
     uint sphereIndex;
@@ -94,7 +94,7 @@ ivec3 GetCell3D(uint objectIndex)
 }
 ivec3 GetCell3DFromPosition(vec3 position)
 {
-    return ivec3(floor(position /objectData[0].radius));
+    return ivec3(floor(position /objectData[1].radius));
 }
 
 // Hash cell coordinate to a single unsigned integer
@@ -311,10 +311,10 @@ vec3 CalculateViscousityForce(uint objectIndex){
 
     smoothedEnergy /= max(objectData[objectIndex].density, minDensity);
 
-    float foamContribution = (vorticityStrength + dissipation) * foamFactor * deltaTime;
+    float foamContribution = (vorticityStrength + dissipation) * foamFactor * deltaTime*smoothedEnergy;
 
-    objectData[objectIndex].color.x = clamp(objectData[objectIndex].color.x - foamDecay * deltaTime,0,maxFoam);
     objectData[objectIndex].color.x += foamContribution;
+    objectData[objectIndex].color.x = clamp(objectData[objectIndex].color.x - foamDecay * deltaTime, 0, maxFoam);
 
     return viscousityForce;
 }
@@ -388,7 +388,9 @@ void UpdateSpatialHash(uint objectIndex){
 void Gravity(uint objectIndex){
 if (objectData[objectIndex].color.x>0.5){
     bool notsurface=CalculatePointDensity(objectData[objectIndex].predictedPosition+vec3(0,objectData[objectIndex].radius*1.0,0))>0.25;
-    if (notsurface){
+        if (notsurface)
+    {
+            objectData[objectIndex].velocity.y -= gravity * deltaTime*0.5;
     return;
     }
     }    

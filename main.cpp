@@ -546,11 +546,11 @@ int main() {
 	glfwSwapInterval(vSync);
 	gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 	//init spheres
-	float bounds[3] = {40, 40, 40 };
+	float bounds[3] = {30, 30, 30 };
 	float center1[3] = { -0.f, 70.f, 0.f };
 	float center2[3] = { 45.f, 50.f, 0.f };
-	int amount =36000;
-	float simulationBoundsScale[3] = { 65.f, 65.f, 65.f };
+	int amount =33000;
+	float simulationBoundsScale[3] = { 60.f, 60.f, 60.f };
 	float simulationBoundsPosition[3] = { 0, simulationBoundsScale[1]+10, 0 };
 	float simulationBoundsRotation[3] = { 0, 0.0, 0 };
 	unsigned int densityResolution[3] = { simulationBoundsScale[0] * 3,simulationBoundsScale[1] * 3,simulationBoundsScale[2] * 3};
