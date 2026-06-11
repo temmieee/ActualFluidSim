@@ -14,11 +14,10 @@ struct Sphere
 {
 	vec3 position;
 	float radius;
-	vec4 color;
 	vec3 velocity;
 	float density;
 	vec3 predictedPosition;
-	float nearDensity;
+	float foam;
 };
 
 
@@ -138,7 +137,6 @@ vec3 SampleDensityAtPosition(vec3 position, uint rng)
 	float velocityDiff = 0.0;
 	float kineticEnergy=0.0;
 	ivec3 currCell = GetCell3DPosition(position);
-    //objectData[objectIndex].color.xyz=vec3(currCell)/3;
 	for (uint cellOffsetIndex = 0; cellOffsetIndex < 27; cellOffsetIndex++)
 	{
 		uint hash = HashCell3D(currCell + offsets3D[cellOffsetIndex]);
@@ -158,7 +156,7 @@ vec3 SampleDensityAtPosition(vec3 position, uint rng)
 			if (dst > objectData[neighborIndex].radius)	continue;
 			density += DensityKernel(objectData[neighborIndex].radius, dst,rng);
             float influence=FoamKernel(objectData[neighborIndex].radius, dst);
-			velocityDiff +=influence*objectData[neighborIndex].color.x;
+			velocityDiff +=influence*objectData[neighborIndex].foam;
 			//if (density > 1.5) break;
 		}
     

@@ -62,26 +62,21 @@ struct Vector4
 struct Sphere{
 	Vector3 position;
 	float radius;
-	Vector4 color;
 	Vector3 velocity;
 	float density;
 	Vector3 predictedPosition;
-	float nearDensity;
+	float foam;
 	Sphere(float input[]) {
 		position.x = input[0];
 		position.y = input[1];
 		position.z = input[2];
 		radius = input[3];
-		color.x = input[4];
-		color.y = input[5];
-		color.z = input[6];
-		color.w = input[7];
 		velocity = { input[8], input[9], input[10] };
 		density = input[11];
 		predictedPosition.x = input[0];
 		predictedPosition.y = input[1];
 		predictedPosition.z = input[2];
-		nearDensity = input[11];
+		foam = input[11];
 	}
 };
 struct SphereIndex {
@@ -549,7 +544,7 @@ int main() {
 	float bounds[3] = {30, 30, 30 };
 	float center1[3] = { -0.f, 70.f, 0.f };
 	float center2[3] = { 45.f, 50.f, 0.f };
-	int amount =33000;
+	int amount =36000;
 	float simulationBoundsScale[3] = { 60.f, 60.f, 60.f };
 	float simulationBoundsPosition[3] = { 0, simulationBoundsScale[1]+10, 0 };
 	float simulationBoundsRotation[3] = { 0, 0.0, 0 };
